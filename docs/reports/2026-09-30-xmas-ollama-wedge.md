@@ -78,5 +78,5 @@ In the 7 days before the incident, these clients had zero failures.
 | 2 | llm-head: context size as part of what's loaded; no reloads onto busy copies | **Done** `4aec078`. The 1920×1080 vision request went from 128 s to 10 s |
 | 3 | Upgrade xmas to Ollama 0.32.4, matching european | **Done** 2026-09-30 19:55 UTC. Phase 0 settings kept; probes pass |
 | 4 | Load-test rule: check real-client errors after every round | **Adopted.** `prodcheck.sh` on the head host runs the check |
-| 5 | Alert on real-client failures, and probe each model on each host directly | Plugins **done** and installed on the head host (`7f16233`, `contrib/icinga/`). Icinga master config pending |
+| 5 | Alert on real-client failures, and probe each model on each host directly | **Done.** Four Icinga services are live and green, alerting through the existing ntfy rule (`7f16233`, `contrib/icinga/`) |
 | 6 | Photo classifier: send `num_ctx` in its warmup and probe requests | **Done** in the client repo |
