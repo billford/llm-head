@@ -169,3 +169,21 @@ def test_allow_cpu_offload_skips_memory_check():
     huge = ModelFacts(vram_bytes=40 * GiB, allow_cpu_offload=True)
     hosts = [host("a", [], installed=frozenset({"big:70b"}))]
     assert choose("big:70b", hosts, huge).kind == Kind.DISPATCH
+
+
+def test_does_not_pile_onto_a_host_that_is_still_loading():
+    """Phase 2 shadow run: llama3.2 took 9.6s to load on xmas and five requests queued
+    behind that load while european was idle and could load it in about a second."""
+    xmas = host("xmas", [LLAMA], inflight={LLAMA: 2})
+    xmas.loaded[LLAMA].ready_in = 8.0
+    hosts = [xmas, host("european", [])]
+    d = choose(LLAMA, hosts, facts(LLAMA, typical_duration=0.5, load_time=1.5))
+    assert (d.kind, d.host, d.cold) == (Kind.DISPATCH, "european", True)
+
+
+def test_a_nearly_finished_load_is_still_worth_waiting_for():
+    xmas = host("xmas", [LLAMA])
+    xmas.loaded[LLAMA].ready_in = 0.5
+    hosts = [xmas, host("european", [])]
+    d = choose(LLAMA, hosts, facts(LLAMA, typical_duration=0.5, load_time=3.0))
+    assert (d.kind, d.host, d.reason) == (Kind.DISPATCH, "xmas", "loading")

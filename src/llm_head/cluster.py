@@ -46,7 +46,8 @@ class HostState:
     installed: dict[str, InstalledModel] = field(default_factory=dict)
     loaded: dict[str, LoadedModel] = field(default_factory=dict)
     # Loads and evictions the head started that /api/ps doesn't reflect yet.
-    pending_loads: dict[str, tuple[int, float]] = field(default_factory=dict)  # model -> (bytes, deadline)
+    # model -> (bytes, give-up deadline, expected ready time), all monotonic seconds
+    pending_loads: dict[str, tuple[int, float, float]] = field(default_factory=dict)
     pending_evictions: set[str] = field(default_factory=set)
     inflight: Counter = field(default_factory=Counter)
     last_used: dict[str, float] = field(default_factory=dict)
@@ -70,11 +71,12 @@ class HostState:
 
     def snapshot(self, now: float) -> HostSnapshot:
         loaded = {m: lm for m, lm in self.loaded.items() if m not in self.pending_evictions}
-        for m, (size, deadline) in list(self.pending_loads.items()):
+        for m, (size, deadline, ready_at) in list(self.pending_loads.items()):
             if deadline < now:
                 del self.pending_loads[m]
             elif m not in loaded:
-                loaded[m] = LoadedModel(size, last_used=now)
+                # Past the estimate but not yet in /api/ps: assume it's nearly done.
+                loaded[m] = LoadedModel(size, last_used=now, ready_in=max(0.5, ready_at - now))
         for m, lm in loaded.items():
             lm.last_used = self.last_used.get(m, lm.last_used)
         return HostSnapshot(
@@ -136,9 +138,11 @@ class Cluster:
         h = self.hosts[host]
         h.inflight[model] += 1
         h.last_used[model] = time.monotonic()
-        if cold:
-            vram = self.stats.vram_estimate(model, self.file_size(model))
-            h.pending_loads[model] = (vram, time.monotonic() + PENDING_LOAD_TTL)
+        if cold and model not in h.pending_loads:
+            size = self.file_size(model)
+            vram = self.stats.vram_estimate(model, size)
+            now = time.monotonic()
+            h.pending_loads[model] = (vram, now + PENDING_LOAD_TTL, now + self.stats.load_time_estimate(model, size))
         h.pending_evictions.update(evict)
 
     def end(self, host: str, model: str, *, ok: bool, duration_ms: float, nbytes: int) -> None:

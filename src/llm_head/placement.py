@@ -48,6 +48,8 @@ class Decision:
 class LoadedModel:
     vram_bytes: int
     last_used: float = 0.0
+    # Seconds until a load the head started should finish; 0 once /api/ps shows it.
+    ready_in: float = 0.0
 
 
 @dataclass
@@ -126,9 +128,9 @@ def choose(
         home = 0 if h.name in facts.home else 1
         return (h.total_inflight, home, (hosts.index(h) - rotation) % len(hosts))
 
-    # Rule 1: loaded with a free slot.
+    # Rule 1: loaded (not still loading) with a free slot.
     warm = [h for h in candidates if model in h.loaded]
-    ready = [h for h in warm if h.free_slots(model) > 0]
+    ready = [h for h in warm if h.free_slots(model) > 0 and h.loaded[model].ready_in <= 0]
     if ready and queued_ahead == 0:
         best = min(ready, key=rank)
         return Decision(Kind.DISPATCH, "loaded", host=best.name)
@@ -137,17 +139,23 @@ def choose(
     cold_options = _cold_options(model, candidates, facts, warm_facts)
 
     if warm:
-        # Rule 2: compare waiting for a slot with loading another copy.
-        total_slots = sum(h.slots_per_model for h in warm)
-        busy = sum(h.inflight.get(model, 0) for h in warm)
-        expected_wait = (busy + queued_ahead) / total_slots * facts.typical_duration
+        # Rule 2: compare waiting on a warm host (for a slot, and for a load still in
+        # progress there) with loading another copy elsewhere. A load in progress looks
+        # like a free slot, but a request sent there waits for the load to finish.
+        def wait_on(h: HostSnapshot) -> float:
+            share = (h.inflight.get(model, 0) + queued_ahead) / h.slots_per_model
+            slot_wait = 0.0 if h.free_slots(model) > 0 and queued_ahead == 0 else share * facts.typical_duration
+            return h.loaded[model].ready_in + slot_wait
+
+        best_warm = min(warm, key=lambda h: (wait_on(h), rank(h)))
+        expected_wait = wait_on(best_warm)
         if cold_options:
             cost, host, evict = min(cold_options, key=lambda o: (o[0], rank(_by_name(candidates, o[1]))))
             if cost < expected_wait:
                 return Decision(Kind.DISPATCH, "replica_cheaper_than_wait", host=host, evict=evict, cold=True)
-        if ready:
-            best = min(ready, key=rank)
-            return Decision(Kind.DISPATCH, "loaded", host=best.name)
+        if best_warm.free_slots(model) > 0:
+            reason = "loaded" if best_warm.loaded[model].ready_in <= 0 else "loading"
+            return Decision(Kind.DISPATCH, reason, host=best_warm.name)
         return Decision(Kind.WAIT, "slots_busy")
 
     if cold_options:
