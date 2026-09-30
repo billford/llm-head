@@ -188,6 +188,14 @@ class LoggingConfig(_Strict):
     max_backups: int = Field(7, ge=0)
 
 
+class SchedulingConfig(_Strict):
+    # Unload the models placement chose before a cold load. When off, Ollama evicts
+    # by its own LRU rule instead.
+    evict: bool = True
+    # Pre-load keep_warm models onto idle hosts.
+    keep_warm: bool = True
+
+
 class Config(_Strict):
     server: ServerConfig = ServerConfig()
     proxy: ProxyConfig = ProxyConfig()
@@ -196,6 +204,9 @@ class Config(_Strict):
     hosts: list[HostConfig] = Field(min_length=1)
     models: dict[str, ModelPolicy] = {}
     queue: QueueConfig = QueueConfig()
+    # Set both to false while another balancer shares the hosts (shadow testing), so
+    # llm-head never unloads or loads a model the other balancer is using.
+    scheduling: SchedulingConfig = SchedulingConfig()
     logging: LoggingConfig = LoggingConfig()
     stats_file: str | None = "/opt/olla/data/llm-head-stats.json"
 

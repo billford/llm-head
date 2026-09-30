@@ -196,3 +196,16 @@ async def test_cold_load_learns_model_footprint():
         await c.post(GEN, json=gen(model="llama3.2:3b"))
         await asyncio.sleep(0.2)
         assert head.stats.get("llama3.2:3b").vram_bytes == 3_097_881_476
+
+
+async def test_shadow_mode_never_unloads_models_itself():
+    over = {"scheduling": {"evict": False, "keep_warm": False}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        for f in fakes:
+            await f._ensure_loaded(QWEN)
+            await f._ensure_loaded("llama3.2:3b")
+        await asyncio.sleep(0.2)
+        r = await c.post(GEN, json=gen(model="gpt-oss:20b"))
+        assert r.status_code == 200
+        assert not log.find("Evicting model")
+        assert not head._background or all("warm" not in repr(t) for t in head._background)

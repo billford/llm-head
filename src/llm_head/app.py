@@ -80,7 +80,8 @@ class Head:
         self.log.info("llm-head starting", version=VERSION, hosts=[h.name for h in self.cfg.hosts])
         self.cluster.start()
         self._background.append(asyncio.create_task(self._save_stats_loop()))
-        self._background.append(asyncio.create_task(self._warm_loop()))
+        if self.cfg.scheduling.keep_warm:
+            self._background.append(asyncio.create_task(self._warm_loop()))
 
     async def stop(self) -> None:
         for t in self._background:
@@ -257,7 +258,7 @@ async def proxy(request: Request) -> Response:
 
         host = lease.host
         target = head.cluster.hosts[host].cfg.url + "/" + path + query
-        if lease.decision.evict:
+        if lease.decision.evict and head.cfg.scheduling.evict:
             await head.evict(host, lease.decision.evict)
         head.log.info("Request dispatching", request_id=rid, endpoint=host, target=target, model=model,
                       placement=lease.decision.reason, cold=lease.decision.cold, queued_ms=int(lease.queued_ms),
