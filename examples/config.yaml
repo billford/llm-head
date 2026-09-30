@@ -1,0 +1,84 @@
+# llm-head config for a two-host cluster of 16 GB GPUs.
+# Validate before (re)starting:  llm-head check-config -c config.yaml
+
+server:
+  host: 0.0.0.0
+  port: 40114            # Olla's default, so clients don't change
+  read_header_timeout: 10s
+  shutdown_timeout: 10s
+  request_logging: true
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: [GET, POST, OPTIONS]
+    allowed_headers: ["*"]
+    allow_credentials: false
+    max_age: 3600
+  request_limits:
+    max_body_size: 104857600   # 100 MB (vision requests carry images)
+    max_header_size: 1048576
+  rate_limits:
+    global_requests_per_minute: 1000
+    per_ip_requests_per_minute: 100
+    burst_size: 50
+    trust_proxy_headers: false
+    trusted_proxy_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+
+proxy:
+  connect_timeout: 10s
+  response_header_timeout: 120s   # non-streaming gpt-oss answers can take a minute
+  response_timeout: 15m
+  read_timeout: 10m
+  stall_timeout: 60s              # abort a stream that sends nothing for this long
+  # max_attempts: defaults to one per host
+
+health:
+  interval: 5s
+  timeout: 3s            # must be less than interval
+  failure_threshold: 3   # a busy host answering slowly once is not a dead host
+
+discovery:
+  ps_interval: 1s
+  tags_interval: 5m
+
+# slots_per_model must equal OLLAMA_NUM_PARALLEL on the host, and max_loaded_models
+# must equal OLLAMA_MAX_LOADED_MODELS. The head never sends more than that.
+hosts:
+  - name: xmas
+    url: http://xmas.lan:11434
+    vram_mb: 16311
+    reserve_mb: 512
+    slots_per_model: 2
+    max_loaded_models: 2
+  - name: european
+    url: http://european.lan:11434
+    vram_mb: 16311
+    reserve_mb: 512
+    slots_per_model: 2
+    max_loaded_models: 2
+
+# Optional per-model policy. Keys are model names or globs, case-insensitive.
+models:
+  gpt-oss:20b:
+    home: [european]       # tie-breaker only; it still goes wherever it fits
+  qwen2.5vl:7b-q4_k_m:
+    keep_warm: 2           # hottest model: keep it loaded on two hosts when idle
+  llama3.2:3b:
+    keep_warm: 2
+
+queue:
+  max_wait: 120s           # then 503 with Retry-After instead of hanging
+  classes:
+    interactive:
+      match: [127.0.0.1/32, "::1/128", 10.0.0.20/32]   # local services, home automation
+      boost: 30s           # ordered as if they arrived 30s earlier
+    batch:
+      default: true
+
+logging:
+  file: /opt/olla/logs/olla.log   # same file the Olla dashboard tails
+  level: info
+  max_size_mb: 1
+  max_backups: 7
+
+stats_file: /opt/olla/data/llm-head-stats.json

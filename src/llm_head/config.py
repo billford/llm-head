@@ -59,8 +59,10 @@ class PerEndpointLimits(_Strict):
 class RateLimits(_Strict):
     global_requests_per_minute: int = 1000
     per_ip_requests_per_minute: int = 100
-    health_requests_per_minute: int = 1000
     burst_size: int = 50
+    # Accepted so an Olla server block can be copied as is. Olla v0.0.28 ignores both:
+    # /internal/health is never rate limited and per_endpoint has no effect.
+    health_requests_per_minute: int = 1000
     per_endpoint: PerEndpointLimits = PerEndpointLimits()
     cleanup_interval: Duration = 300.0
     trust_proxy_headers: bool = False
@@ -91,8 +93,9 @@ class ProxyConfig(_Strict):
     read_timeout: Duration = 600.0
     # Streaming responses that produce no bytes for this long are aborted.
     stall_timeout: Duration = 60.0
-    # Total attempts for a request that fails before its first response byte.
-    max_attempts: int = Field(2, ge=1, le=5)
+    # Attempts for a request whose host can't be reached (connection error, or 502/503/504
+    # before any response body). Default: one per host, as in Olla.
+    max_attempts: int | None = Field(None, ge=1, le=10)
 
 
 class HealthConfig(_Strict):
@@ -181,7 +184,7 @@ class QueueConfig(_Strict):
 class LoggingConfig(_Strict):
     file: str | None = "/opt/olla/logs/olla.log"
     level: str = Field("info", pattern=r"^(debug|info|warn|error)$")
-    max_size_mb: int = Field(10, ge=1)
+    max_size_mb: int = Field(1, ge=1)
     max_backups: int = Field(7, ge=0)
 
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=llm-head: load balancer for Ollama clusters that knows which models are loaded
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=olla
+Group=olla
+WorkingDirectory=/opt/llm-head
+# Refuse to start on a bad config instead of crash-looping.
+ExecStartPre=/opt/llm-head/venv/bin/llm-head check-config -c /opt/llm-head/config.yaml
+ExecStart=/opt/llm-head/venv/bin/llm-head serve -c /opt/llm-head/config.yaml
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/olla/logs /opt/olla/data
+
+[Install]
+WantedBy=multi-user.target
