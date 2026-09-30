@@ -72,11 +72,11 @@ In the 7 days before the incident, these clients had zero failures.
 
 ## Follow-up actions
 
-| # | Action | Owner |
+| # | Action | Status |
 |---|---|---|
-| 1 | llm-head: per-model health for each host. When a host misses a response-header timeout for one model, stop sending that model to that host for a while, and test it again before trusting it | llm-head |
-| 2 | llm-head: treat context size as part of what's loaded. "qwen at 4096" and "qwen at 8192" are different states, and a request needing a reload shouldn't wait on a host that never goes idle | llm-head |
-| 3 | Upgrade xmas to the Ollama version european runs (0.32.4), so both hosts run the same version | ops |
-| 4 | Load-test rule: check real-client errors in the Olla log after every round, and stop at the first new failure | process |
-| 5 | Alert on real-client 5xx rate from the balancer's log, and add a synthetic check that requests each hot model on each host directly | monitoring |
-| 6 | Photo classifier: send `num_ctx` in the warmup and health-probe requests, so they keep the model warm at the context size real analyses use | client |
+| 1 | llm-head: per-model health for each host (load watchdog plus quarantine) | **Done** `4aec078` |
+| 2 | llm-head: context size as part of what's loaded; no reloads onto busy copies | **Done** `4aec078`. The 1920×1080 vision request went from 128 s to 10 s |
+| 3 | Upgrade xmas to Ollama 0.32.4, matching european | **Done** 2026-09-30 19:55 UTC. Phase 0 settings kept; probes pass |
+| 4 | Load-test rule: check real-client errors after every round | **Adopted.** `prodcheck.sh` on the head host runs the check |
+| 5 | Alert on real-client failures, and probe each model on each host directly | Plugins **done** and installed on the head host (`7f16233`, `contrib/icinga/`). Icinga master config pending |
+| 6 | Photo classifier: send `num_ctx` in its warmup and probe requests | **Done** in the client repo |
