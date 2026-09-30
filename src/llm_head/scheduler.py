@@ -31,6 +31,7 @@ class Lease:
     model: str
     decision: Decision
     queued_ms: float
+    ctx: int | None = None
 
 
 @dataclass(order=True)
@@ -42,14 +43,17 @@ class _Waiter:
     request_id: str = field(compare=False)
     exclude: frozenset[str] = field(compare=False)
     enqueued: float = field(compare=False)
+    ctx: int | None = field(compare=False)
     future: asyncio.Future = field(compare=False)
 
 
 class Scheduler:
-    def __init__(self, cluster: Cluster, log: EventLog, max_wait: float, boosts: dict[str, float]):
+    def __init__(self, cluster: Cluster, log: EventLog, max_wait: float, boosts: dict[str, float],
+                 head_of_line_after: float = 10.0):
         self.cluster = cluster
         self.log = log
         self.max_wait = max_wait
+        self.head_of_line_after = head_of_line_after
         self.boosts = boosts
         self.waiting: list[_Waiter] = []
         self._seq = itertools.count()
@@ -57,7 +61,8 @@ class Scheduler:
         cluster.on_change = self.pump
 
     async def acquire(
-        self, model: str, *, klass: str, request_id: str, exclude: frozenset[str] = frozenset()
+        self, model: str, *, klass: str, request_id: str, exclude: frozenset[str] = frozenset(),
+        ctx: int | None = None,
     ) -> Lease:
         loop = asyncio.get_running_loop()
         now = time.monotonic()
@@ -70,6 +75,7 @@ class Scheduler:
             exclude=exclude,
             enqueued=now,
             future=loop.create_future(),
+            ctx=ctx,
         )
         self.waiting.append(w)
         self.waiting.sort()
@@ -112,25 +118,38 @@ class Scheduler:
         if not self.waiting:
             return
         warm = self.cluster.all_facts()
+        now = time.monotonic()
         ahead: dict[str, int] = {}
+        # Models whose oldest waiter has waited too long: later waiters queue behind it,
+        # so the copies it needs drain instead of being kept busy by newer requests.
+        hol_blocked: set[str] = set()
         placed: list[_Waiter] = []
         for w in self.waiting:
             if w.future.done():
                 placed.append(w)
                 continue
+            if w.model in hol_blocked:
+                ahead[w.model] = ahead.get(w.model, 0) + 1
+                continue
+            snaps = self.cluster.snapshots()
+            exclude = w.exclude | self.cluster.quarantined_hosts(w.model)
+            if all(s.name in exclude for s in snaps if w.model in s.installed and s.routable):
+                # Everything that has it is quarantined: trying one beats failing outright.
+                exclude = w.exclude
             d = choose(
                 w.model,
-                self.cluster.snapshots(),
+                snaps,
                 self.cluster.facts(w.model),
                 queued_ahead=ahead.get(w.model, 0),
                 rotation=self._rotation,
-                exclude=w.exclude,
+                exclude=exclude,
                 warm_facts=warm,
+                ctx=w.ctx,
             )
             if d.kind == Kind.DISPATCH:
                 self._rotation += 1
-                self.cluster.begin(d.host, w.model, cold=d.cold, evict=d.evict)
-                lease = Lease(d.host, w.model, d, (time.monotonic() - w.enqueued) * 1000)
+                self.cluster.begin(d.host, w.model, cold=d.cold, evict=d.evict, ctx=w.ctx)
+                lease = Lease(d.host, w.model, d, (time.monotonic() - w.enqueued) * 1000, ctx=w.ctx)
                 w.future.set_result(lease)
                 placed.append(w)
             elif d.kind == Kind.REJECT:
@@ -142,6 +161,8 @@ class Scheduler:
                 placed.append(w)
             else:
                 ahead[w.model] = ahead.get(w.model, 0) + 1
+                if now - w.enqueued > self.head_of_line_after:
+                    hol_blocked.add(w.model)
         for w in placed:
             self._remove(w)
 

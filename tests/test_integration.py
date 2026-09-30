@@ -209,3 +209,55 @@ async def test_shadow_mode_never_unloads_models_itself():
         assert r.status_code == 200
         assert not log.find("Evicting model")
         assert not head._background or all("warm" not in repr(t) for t in head._background)
+
+
+async def test_wedged_host_is_detected_retried_and_quarantined():
+    """2026-09-30: Ollama on xmas stopped loading models for 5 hours while passing health
+    checks. A request needing a load there must fail over quickly, and later requests for
+    that model must avoid xmas."""
+    over = {"proxy": {"load_timeout": "1s", "model_quarantine": "60s"},
+            "models": {"llama3.2:3b": {"home": ["xmas"]}}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        head.stats.get("llama3.2:3b").load_time = 0.05
+        fakes[0].wedged = True
+        t0 = asyncio.get_running_loop().time()
+        r = await c.post(GEN, json=gen(model="llama3.2:3b"))
+        first = asyncio.get_running_loop().time() - t0
+        assert r.status_code == 200 and r.headers["x-olla-endpoint"] == "european"
+        assert 1.0 <= first < 4.0, first
+        q = log.find("Model quarantined on endpoint")
+        assert q and q[-1]["endpoint"] == "xmas" and q[-1]["model"] == "llama3.2:3b"
+        # xmas stays healthy for everything else, and llama now goes straight to european.
+        assert head.cluster.hosts["xmas"].status == "healthy"
+        t0 = asyncio.get_running_loop().time()
+        r = await c.post(GEN, json=gen(model="llama3.2:3b"))
+        assert r.headers["x-olla-endpoint"] == "european"
+        assert asyncio.get_running_loop().time() - t0 < 0.8
+
+
+async def test_context_reload_is_not_starved_by_steady_traffic():
+    """The warmup/probe traffic at 4096 kept qwen busy while an 8192 analysis waited for a
+    reload that never came. The head must get the 8192 request served."""
+    over = {"queue": {"head_of_line_after": "300ms", "max_wait": "10s"}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        for f in fakes:
+            f.token_seconds = 0.01
+        await warm_everywhere(head, fakes)
+        stop = asyncio.Event()
+
+        async def steady():
+            while not stop.is_set():
+                await c.post(GEN, json=gen(n=20))
+
+        pumps = [asyncio.create_task(steady()) for _ in range(6)]
+        await asyncio.sleep(0.3)
+        t0 = asyncio.get_running_loop().time()
+        r = await c.post(GEN, json=gen(n=5, options={"num_predict": 5, "num_ctx": 8192}))
+        took = asyncio.get_running_loop().time() - t0
+        stop.set()
+        await asyncio.gather(*pumps)
+        assert r.status_code == 200, r.text
+        assert took < 3.0, took
+        # It was served by reloading qwen at 8192 on a host where qwen was idle.
+        big = [d for d in log.find("Request dispatching") if d.get("num_ctx") == 8192]
+        assert big and big[-1]["placement"] == "reload_context", big

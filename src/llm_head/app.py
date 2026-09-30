@@ -67,6 +67,7 @@ class Head:
             self.log,
             cfg.queue.max_wait,
             {name: c.boost for name, c in cfg.queue.classes.items()},
+            head_of_line_after=cfg.queue.head_of_line_after,
         )
         self.client_ip = ClientIP(cfg.server.rate_limits)
         self.started = time.time()
@@ -157,6 +158,12 @@ def _json_body(raw: bytes) -> dict | None:
     return body if isinstance(body, dict) else None
 
 
+def _requested_ctx(body: dict | None) -> int | None:
+    opts = (body or {}).get("options")
+    n = opts.get("num_ctx") if isinstance(opts, dict) else None
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else None
+
+
 def _requested_model(body: dict | None) -> str | None:
     if not body:
         return None
@@ -242,12 +249,13 @@ async def proxy(request: Request) -> Response:
         )
 
     klass = head.classify(ip)
+    ctx = _requested_ctx(body)
     exclude: frozenset[str] = frozenset()
     last_error = ""
     attempts = head.cfg.proxy.max_attempts or len(head.cluster.hosts)
     for attempt in range(1, attempts + 1):
         try:
-            lease = await head.scheduler.acquire(model, klass=klass, request_id=rid, exclude=exclude)
+            lease = await head.scheduler.acquire(model, klass=klass, request_id=rid, exclude=exclude, ctx=ctx)
         except Rejected as rej:
             if exclude and rej.reason == "no_healthy_endpoints":
                 return _bad_gateway(head, rid, None, last_error)
@@ -262,17 +270,23 @@ async def proxy(request: Request) -> Response:
             await head.evict(host, lease.decision.evict)
         head.log.info("Request dispatching", request_id=rid, endpoint=host, target=target, model=model,
                       placement=lease.decision.reason, cold=lease.decision.cold, queued_ms=int(lease.queued_ms),
-                      attempt=attempt)
+                      num_ctx=ctx, attempt=attempt)
+        opening = open_upstream(
+            head.client, request.method, target, incoming, raw,
+            connect_timeout=head.cfg.proxy.connect_timeout, header_timeout=head.cfg.proxy.response_header_timeout,
+            read_timeout=head.cfg.proxy.read_timeout,
+        )
         try:
-            relay = await open_upstream(
-                head.client, request.method, target, incoming, raw,
-                connect_timeout=head.cfg.proxy.connect_timeout, header_timeout=head.cfg.proxy.response_header_timeout,
-                read_timeout=head.cfg.proxy.read_timeout,
-            )
+            if lease.decision.cold:
+                relay = await _with_load_watchdog(head, opening, host, model, ctx)
+            else:
+                relay = await opening
         except UpstreamUnavailable as exc:
             last_error = str(exc)
             if exc.connection:
                 head.cluster.connection_failed(host, last_error)
+            if exc.model_problem:
+                head.cluster.quarantine_model(host, model, last_error)
             head.scheduler.release(lease, ok=False, duration_ms=(time.monotonic() - started) * 1000, nbytes=0)
             head.log.warn("Request failed", request_id=rid, endpoint=host, model=model, error=last_error,
                           attempt=attempt, will_retry=attempt < attempts)
@@ -290,6 +304,39 @@ async def proxy(request: Request) -> Response:
     return _bad_gateway(head, rid, None, last_error)
 
 
+async def _with_load_watchdog(head: Head, opening, host: str, model: str, ctx: int | None):
+    """Wait for response headers, but give up if the model never shows up as loaded.
+
+    A healthy Ollama lists a model in /api/ps within seconds of starting to load it. One
+    that has stopped loading models (2026-09-30 incident) never does, and never answers,
+    while its health check stays green. Aborting before any response byte makes a retry
+    on another host safe.
+    """
+    h = head.cluster.hosts[host]
+    want = ctx or h.cfg.default_num_ctx
+    size = head.cluster.file_size(model)
+    deadline = max(head.cfg.proxy.load_timeout, 4 * head.stats.load_time_estimate(model, size))
+    task = asyncio.ensure_future(opening)
+    start = time.monotonic()
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=1.0)
+            if done:
+                return task.result()
+            if h.is_loaded(model, want):
+                return await task
+            if time.monotonic() - start > deadline:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, UpstreamUnavailable):
+                    await task
+                raise UpstreamUnavailable(
+                    f"model {model} (num_ctx {want}) did not load on {host} within {deadline:.0f}s",
+                    connection=False, model_problem=True)
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+
+
 async def _finish_stream(head: Head, rid: str, lease: Lease, relay, started: float):
     """Relay the body, then release the slot and log the outcome, however it ends."""
     cancelled = False
@@ -305,6 +352,10 @@ async def _finish_stream(head: Head, rid: str, lease: Lease, relay, started: flo
         # A client hanging up is not the host's fault.
         head.scheduler.release(lease, ok=ok or cancelled, duration_ms=duration_ms, nbytes=relay.nbytes)
         u = relay.usage()
+        if relay.stalled or relay.error == "response_timeout":
+            head.cluster.quarantine_model(lease.host, lease.model, relay.error)
+        elif ok and not cancelled:
+            head.cluster.model_succeeded(lease.host, lease.model)
         if ok and not cancelled:
             head.stats.observe_request(lease.model, duration_ms / 1000,
                                        load_time=u.load_seconds if lease.decision.cold else 0.0)

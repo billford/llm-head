@@ -28,10 +28,13 @@ TAIL_BYTES = 256 * 1024  # enough to hold the final stats object of any response
 class UpstreamUnavailable(Exception):
     """The backend could not be reached or failed before sending a usable response."""
 
-    def __init__(self, message: str, *, connection: bool):
+    def __init__(self, message: str, *, connection: bool, model_problem: bool = False):
         super().__init__(message)
         # True for network failures, which count toward marking the host offline.
         self.connection = connection
+        # True when the host is up but can't serve this model (no headers in time, or
+        # the model never loaded): quarantine the model on that host, not the host.
+        self.model_problem = model_problem
 
 
 @dataclass
@@ -121,8 +124,8 @@ async def open_upstream(
     try:
         resp = await asyncio.wait_for(client.send(req, stream=True), timeout=header_timeout)
     except asyncio.TimeoutError as exc:
-        raise UpstreamUnavailable(f"network timeout: no response headers within {header_timeout:.0f}s",
-                                  connection=True) from exc
+        raise UpstreamUnavailable(f"no response headers within {header_timeout:.0f}s",
+                                  connection=False, model_problem=True) from exc
     except httpx.HTTPError as exc:
         raise UpstreamUnavailable(f"network error: {type(exc).__name__}: {exc}", connection=True) from exc
     if resp.status_code in RETRYABLE_STATUS:

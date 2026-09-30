@@ -36,6 +36,7 @@ class Loaded:
     inflight: int = 0
     last_used: float = 0.0
     spilled: bool = False
+    ctx: int = 4096
 
 
 @dataclass
@@ -50,6 +51,11 @@ class FakeOllama:
     healthy: bool = True
     health_delay: float = 0.0
     fail_next: int = 0  # respond 503 to this many inference requests
+    # Like Ollama on xmas on 2026-09-30: loads never happen and requests needing one hang
+    # silently, while already-loaded models keep working and GET / stays healthy.
+    wedged: bool = False
+    default_ctx: int = 4096
+    reloads: int = 0
     # Observability for tests.
     loaded: dict[str, Loaded] = field(default_factory=dict)
     loads: int = 0
@@ -87,11 +93,27 @@ class FakeOllama:
                 return m
         return None
 
-    async def _ensure_loaded(self, model: str) -> tuple[Loaded, float]:
-        """Load `model`, evicting idle models LRU-first like Ollama. Returns load seconds."""
+    async def _ensure_loaded(self, model: str, ctx: int | None = None) -> tuple[Loaded, float]:
+        """Load `model`, evicting idle models LRU-first like Ollama. Returns load seconds.
+
+        A model loaded with a different context size is reloaded, but only once it has no
+        requests running, as Ollama does."""
+        ctx = ctx or self.default_ctx
+        lm = self.loaded.get(model)
+        if lm and lm.ctx != ctx:
+            if self.wedged:
+                await asyncio.Event().wait()
+            async with self._slot_free:
+                await self._slot_free.wait_for(lambda: lm.inflight == 0)
+            async with self._lock:
+                if self.loaded.get(model) is lm and lm.ctx != ctx:
+                    del self.loaded[model]
+                    self.reloads += 1
+        if model not in self.loaded and self.wedged:
+            await asyncio.Event().wait()
         async with self._lock:
             lm = self.loaded.get(model)
-            if lm:
+            if lm and lm.ctx == ctx:
                 return lm, 0.0
             size = self.models[model]
             used = lambda: sum(x.size for x in self.loaded.values())  # noqa: E731
@@ -102,14 +124,14 @@ class FakeOllama:
             spilled = used() + size > self.vram_bytes
             if spilled:
                 self.spills += 1
-            lm = Loaded(size=size, spilled=spilled)
+            lm = Loaded(size=size, spilled=spilled, ctx=ctx)
             self.loaded[model] = lm
             self.loads += 1
         await asyncio.sleep(self.load_seconds)
         return lm, self.load_seconds
 
-    async def _run(self, model: str, n_tokens: int):
-        lm, load_s = await self._ensure_loaded(model)
+    async def _run(self, model: str, n_tokens: int, ctx: int | None = None):
+        lm, load_s = await self._ensure_loaded(model, ctx)
         # Ollama queues requests beyond NUM_PARALLEL internally.
         async with self._slot_free:
             self._queued += 1
@@ -164,7 +186,8 @@ class FakeOllama:
         return JSONResponse(
             {
                 "models": [
-                    {"name": m, "model": m, "size": x.size, "size_vram": x.size if not x.spilled else x.size // 2}
+                    {"name": m, "model": m, "size": x.size, "size_vram": x.size if not x.spilled else x.size // 2,
+                     "context_length": x.ctx}
                     for m, x in self.loaded.items()
                 ]
             }
@@ -195,8 +218,9 @@ class FakeOllama:
             return JSONResponse({"model": m, "done": True, "done_reason": "unload"})
         self.requests += 1
         n = int((body.get("options") or {}).get("num_predict") or 8)
+        ctx = (body.get("options") or {}).get("num_ctx")
         chat = request.url.path.endswith("/chat")
-        lm, load_s = await self._run(m, n)
+        lm, load_s = await self._run(m, n, ctx)
         started = time.monotonic()
 
         def final(extra: dict) -> dict:

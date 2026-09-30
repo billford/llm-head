@@ -23,7 +23,9 @@ def free_port() -> int:
 
 @asynccontextmanager
 async def serve(app, port: int):
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="on"))
+    # A wedged fake host holds requests forever; don't let that block test teardown.
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="on",
+                                           timeout_graceful_shutdown=1))
     task = asyncio.create_task(server.serve())
     while not server.started:
         await asyncio.sleep(0.01)

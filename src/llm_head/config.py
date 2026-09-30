@@ -93,6 +93,13 @@ class ProxyConfig(_Strict):
     read_timeout: Duration = 600.0
     # Streaming responses that produce no bytes for this long are aborted.
     stall_timeout: Duration = 60.0
+    # A request that needs a model loaded is aborted and retried elsewhere if the model
+    # hasn't appeared in the host's /api/ps by then (at least this long, or 4x the
+    # learned load time). Catches an Ollama that has stopped loading models.
+    load_timeout: Duration = 45.0
+    # After a host fails to load or serve a model, avoid that model there for this long,
+    # doubling on each repeat up to 1 hour.
+    model_quarantine: Duration = 300.0
     # Attempts for a request whose host can't be reached (connection error, or 502/503/504
     # before any response body). Default: one per host, as in Olla.
     max_attempts: int | None = Field(None, ge=1, le=10)
@@ -129,6 +136,9 @@ class HostConfig(_Strict):
     slots_per_model: int = Field(2, ge=1)
     # Must match OLLAMA_MAX_LOADED_MODELS on the host.
     max_loaded_models: int = Field(2, ge=1)
+    # Context size Ollama gives a request that doesn't set num_ctx (OLLAMA_CONTEXT_LENGTH,
+    # or Ollama's own default). /api/ps shows it as context_length.
+    default_num_ctx: int = Field(4096, ge=256)
 
     @model_validator(mode="after")
     def _reserve_below_vram(self) -> HostConfig:
@@ -164,6 +174,9 @@ class PriorityClass(_Strict):
 
 class QueueConfig(_Strict):
     max_wait: Duration = 120.0
+    # Once the oldest waiting request for a model has waited this long, later requests
+    # for that model wait behind it instead of taking slots it is waiting for.
+    head_of_line_after: Duration = 10.0
     classes: dict[str, PriorityClass] = {
         "interactive": PriorityClass(match=["127.0.0.1/32", "::1/128"], boost=30.0),
         "batch": PriorityClass(default=True),

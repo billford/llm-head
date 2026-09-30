@@ -46,9 +46,12 @@ class HostState:
     installed: dict[str, InstalledModel] = field(default_factory=dict)
     loaded: dict[str, LoadedModel] = field(default_factory=dict)
     # Loads and evictions the head started that /api/ps doesn't reflect yet.
-    # model -> (bytes, give-up deadline, expected ready time), all monotonic seconds
-    pending_loads: dict[str, tuple[int, float, float]] = field(default_factory=dict)
-    pending_evictions: set[str] = field(default_factory=set)
+    # model -> (bytes, give-up deadline, expected ready time, context size); monotonic seconds
+    pending_loads: dict[str, tuple[int, float, float, int]] = field(default_factory=dict)
+    # model -> context size of the copy being unloaded
+    pending_evictions: dict[str, int | None] = field(default_factory=dict)
+    # model -> (quarantined until, strikes); monotonic seconds
+    quarantine: dict[str, tuple[float, int]] = field(default_factory=dict)
     inflight: Counter = field(default_factory=Counter)
     last_used: dict[str, float] = field(default_factory=dict)
     # Counters for /internal/status.
@@ -69,14 +72,26 @@ class HostState:
     def routable(self) -> bool:
         return self.status == "healthy" and not self.draining
 
+    def is_loaded(self, model: str, ctx: int) -> bool:
+        lm = self.loaded.get(model)
+        return lm is not None and (lm.context_length is None or lm.context_length == ctx)
+
+    def quarantined(self, model: str, now: float) -> bool:
+        q = self.quarantine.get(model)
+        return q is not None and q[0] > now
+
     def snapshot(self, now: float) -> HostSnapshot:
-        loaded = {m: lm for m, lm in self.loaded.items() if m not in self.pending_evictions}
-        for m, (size, deadline, ready_at) in list(self.pending_loads.items()):
+        loaded = {
+            m: lm for m, lm in self.loaded.items()
+            if not (m in self.pending_evictions and self.pending_evictions[m] == lm.context_length)
+        }
+        for m, (size, deadline, ready_at, ctx) in list(self.pending_loads.items()):
             if deadline < now:
                 del self.pending_loads[m]
             elif m not in loaded:
                 # Past the estimate but not yet in /api/ps: assume it's nearly done.
-                loaded[m] = LoadedModel(size, last_used=now, ready_in=max(0.5, ready_at - now))
+                loaded[m] = LoadedModel(size, last_used=now, ready_in=max(0.5, ready_at - now),
+                                        context_length=ctx)
         for m, lm in loaded.items():
             lm.last_used = self.last_used.get(m, lm.last_used)
         return HostSnapshot(
@@ -88,6 +103,7 @@ class HostState:
             installed=frozenset(self.installed),
             loaded=loaded,
             inflight={m: n for m, n in self.inflight.items() if n > 0},
+            default_num_ctx=self.cfg.default_num_ctx,
         )
 
 
@@ -134,16 +150,42 @@ class Cluster:
 
     # ---- bookkeeping for dispatched requests -----------------------------------------
 
-    def begin(self, host: str, model: str, *, cold: bool, evict: tuple[str, ...]) -> None:
+    def begin(self, host: str, model: str, *, cold: bool, evict: tuple[str, ...], ctx: int | None = None) -> None:
         h = self.hosts[host]
         h.inflight[model] += 1
         h.last_used[model] = time.monotonic()
+        for m in evict:
+            h.pending_evictions[m] = h.loaded[m].context_length if m in h.loaded else None
         if cold and model not in h.pending_loads:
             size = self.file_size(model)
             vram = self.stats.vram_estimate(model, size)
             now = time.monotonic()
-            h.pending_loads[model] = (vram, now + PENDING_LOAD_TTL, now + self.stats.load_time_estimate(model, size))
-        h.pending_evictions.update(evict)
+            h.pending_loads[model] = (vram, now + PENDING_LOAD_TTL,
+                                      now + self.stats.load_time_estimate(model, size),
+                                      ctx or h.cfg.default_num_ctx)
+
+    def quarantine_model(self, host: str, model: str, reason: str) -> None:
+        """Stop sending `model` to `host` for a while: it failed to load or respond there."""
+        h = self.hosts[host]
+        now = time.monotonic()
+        _, strikes = h.quarantine.get(model, (0.0, 0))
+        strikes += 1
+        period = min(3600.0, self.cfg.proxy.model_quarantine * 2 ** (strikes - 1))
+        h.quarantine[model] = (now + period, strikes)
+        h.pending_loads.pop(model, None)
+        self.log.warn("Model quarantined on endpoint", endpoint=host, model=model, reason=reason,
+                      seconds=int(period), strikes=strikes)
+        self.on_change()
+
+    def model_succeeded(self, host: str, model: str) -> None:
+        h = self.hosts[host]
+        if model in h.quarantine:
+            del h.quarantine[model]
+            self.log.info("Model quarantine cleared", endpoint=host, model=model)
+
+    def quarantined_hosts(self, model: str) -> frozenset[str]:
+        now = time.monotonic()
+        return frozenset(h.name for h in self.hosts.values() if h.quarantined(model, now))
 
     def end(self, host: str, model: str, *, ok: bool, duration_ms: float, nbytes: int) -> None:
         h = self.hosts[host]
@@ -252,16 +294,22 @@ class Cluster:
             vram = int(m.get("size_vram") or 0)
             if not name:
                 continue
-            loaded[name] = LoadedModel(vram, last_used=h.last_used.get(name, 0.0))
+            ctx = m.get("context_length")
+            loaded[name] = LoadedModel(vram, last_used=h.last_used.get(name, 0.0),
+                                       context_length=int(ctx) if ctx else None)
             if vram and vram >= int(m.get("size") or 0):
                 # Only learn footprints from fully-on-GPU loads; a spilled load under-reports.
                 self.stats.observe_loaded(name, vram)
-        changed = set(loaded) != set(h.loaded)
+        changed = {(k, v.context_length) for k, v in loaded.items()} != {
+            (k, v.context_length) for k, v in h.loaded.items()}
         h.loaded = loaded
-        for name in list(h.pending_loads):
-            if name in loaded:
+        for name, pending in list(h.pending_loads.items()):
+            if h.is_loaded(name, pending[3]):
                 del h.pending_loads[name]
-        h.pending_evictions &= set(loaded)
+        # An eviction is done once the model is gone or reloaded with another context size.
+        for name, ctx in list(h.pending_evictions.items()):
+            if name not in loaded or loaded[name].context_length != ctx:
+                del h.pending_evictions[name]
         if changed:
             self.on_change()
 

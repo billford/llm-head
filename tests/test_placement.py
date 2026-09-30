@@ -187,3 +187,33 @@ def test_a_nearly_finished_load_is_still_worth_waiting_for():
     hosts = [xmas, host("european", [])]
     d = choose(LLAMA, hosts, facts(LLAMA, typical_duration=0.5, load_time=3.0))
     assert (d.kind, d.host, d.reason) == (Kind.DISPATCH, "xmas", "loading")
+
+
+def test_model_loaded_at_other_context_size_is_not_warm():
+    """qwen loaded at 4096 can't serve an 8192 request without a reload."""
+    a = host("xmas", [QWEN])
+    a.loaded[QWEN].context_length = 4096
+    b = host("european", [QWEN])
+    b.loaded[QWEN].context_length = 8192
+    d = choose(QWEN, [a, b], facts(QWEN), ctx=8192)
+    assert (d.host, d.cold) == ("european", False)
+    d = choose(QWEN, [a, b], facts(QWEN), ctx=None)  # default 4096
+    assert (d.host, d.cold) == ("xmas", False)
+
+
+def test_reload_for_context_only_where_the_model_is_idle():
+    """Ollama reloads only once the loaded copy is idle; a busy host would starve the request."""
+    a = host("xmas", [QWEN], inflight={QWEN: 1})
+    b = host("european", [QWEN])
+    for h in (a, b):
+        h.loaded[QWEN].context_length = 4096
+    d = choose(QWEN, [a, b], facts(QWEN), ctx=8192)
+    assert (d.kind, d.host, d.reason, d.evict[:1]) == (Kind.DISPATCH, "european", "reload_context", (QWEN,))
+
+
+def test_context_reload_waits_when_every_copy_is_busy():
+    hosts = [host(n, [QWEN], inflight={QWEN: 1}) for n in ("xmas", "european")]
+    for h in hosts:
+        h.loaded[QWEN].context_length = 4096
+    d = choose(QWEN, hosts, facts(QWEN), ctx=8192)
+    assert d.kind == Kind.WAIT
