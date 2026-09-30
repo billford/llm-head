@@ -292,6 +292,17 @@ Two bugs were found and fixed while writing the tests:
   the ports back with two `systemctl` commands. Keep the Olla binary and config in place
   for 30 days.
 
+*Status 2026-09-30:* shadow testing ran on lampoon `:40115`; results are in
+`docs/reports/2026-09-30-phase2-shadow.md`.
+- On identical workloads, llm-head completed 120 of 120 requests in every run, with 3–10
+  cold loads against Olla's 56–71.
+- qwen2.5vl's p95 was 0.8 s against 9–16 s through Olla.
+- Olla hung six requests for 120 s and returned 502s, which is the original problem.
+- Shadow testing found two llm-head bugs, both fixed: a missing request-ID header, and
+  requests queueing behind a slow in-progress load.
+
+Next: run a 2–3 day canary with the batch client on `:40115`, then cut over.
+
 **Phase 3: add the third host**
 1. Install Ollama with the Phase 0 settings and pull the models.
 2. Install the dashboard's SSH public key for its stats collector. Check that the
