@@ -280,7 +280,7 @@ prompts replaced. The contract tests replay that corpus against both services.
 | Metric | Baseline | Target |
 |---|---|---|
 | Request split across identical hosts | 68 / 32 | within 60 / 40 |
-| Model switches per 1,000 requests (busiest host) | 594 | < 50 |
+| Cold loads (first token after more than 3 s) per 1,000 requests | 10.8 (2.0 after Phase 0) | < 1 |
 | qwen2.5vl p95 | 5.5 s (xmas) | < 1 s on every host |
 | gpt-oss:20b max duration | 75.6 s | < 25 s |
 | Requests dispatched with CPU offload | many (12 tok/s runs) | 0 unless `allow_cpu_offload` |
