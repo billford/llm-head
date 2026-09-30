@@ -8,8 +8,11 @@ UNIT="${1:-llm-head}"
 CONFIG="${2:-/opt/llm-head/config.yaml}"
 BASE="${3:-http://127.0.0.1:40114}"
 MAX_WAIT="${4:-120}"
-BIN="$(dirname "$(readlink -f "$0")")/../venv/bin/llm-head"
-[ -x "$BIN" ] || BIN="$(command -v llm-head)"
+BIN="${LLM_HEAD_BIN:-}"
+for cand in "$BIN" "$(dirname "$0")/venv/bin/llm-head" /opt/llm-head/venv/bin/llm-head "$(command -v llm-head || true)"; do
+  if [ -n "$cand" ] && [ -x "$cand" ]; then BIN="$cand"; break; fi
+done
+[ -x "$BIN" ] || { echo "cannot find the llm-head binary; set LLM_HEAD_BIN" >&2; exit 1; }
 
 "$BIN" check-config -c "$CONFIG"
 
