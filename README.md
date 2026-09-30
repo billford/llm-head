@@ -22,12 +22,45 @@ and dashboards keep working.
 
 ## Status
 
-**Design phase. No code yet.** See the spec:
-[`docs/specs/load-aware-scheduler.md`](docs/specs/load-aware-scheduler.md).
+**Phase 1 (build) is done. Not yet deployed.** Every Olla API field and log field our
+dashboard uses is covered by tests against responses captured from a live Olla v0.0.28.
+Next is Phase 2: shadow testing against real GPUs, then cutover. Design and measurements
+are in [`docs/specs/load-aware-scheduler.md`](docs/specs/load-aware-scheduler.md).
 
 The spec includes measurements from a real two-GPU cluster (5,973 requests). They show
 a 2:1 split between identical hosts, 594 model swaps per 1,000 requests on the busier
 host, and gpt-oss:20b slowing from 94 to 12 tokens/s when it shared a 16 GB card.
+
+## Quick start
+
+```bash
+python3 -m venv venv && venv/bin/pip install .
+cp examples/config.yaml config.yaml     # edit hosts, vram_mb, slots_per_model
+venv/bin/llm-head check-config -c config.yaml
+venv/bin/llm-head serve -c config.yaml
+```
+
+Point clients at `http://<head>:40114/olla/ollama` exactly as with Olla.
+
+On each Ollama host, set `OLLAMA_NUM_PARALLEL` and `OLLAMA_MAX_LOADED_MODELS` to match
+that host's `slots_per_model` and `max_loaded_models`. The head never sends more
+requests than that, so waiting happens at the head, where it's visible and bounded.
+
+### New endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /internal/queue` | Waiting requests, and each host's loaded models and in-flight counts |
+| `POST /internal/hosts/{name}/drain` | Stop new work on a host, e.g. before a reboot. Localhost only |
+| `POST /internal/hosts/{name}/undrain` | Put it back in rotation |
+
+## Development
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest
+python -m tests.fake_ollama --port 11500   # a fake GPU host for manual testing
+```
 
 ## License
 

@@ -193,30 +193,35 @@ removes the remaining conflict, since gpt-oss can then have a card to itself.
 
 ## 5. Feature parity with Olla
 
-Nothing ships until every row below is marked ✅ by a contract test that sends the same
-request to Olla (:40114) and to llm-head (:40115) and compares the results.
+Parity is tested against responses captured from the live Olla v0.0.28 on 2026-09-30
+(`tests/fixtures/olla_v0.0.28_contract.json`, hostnames removed), plus a reading of the
+v0.0.28 source for behavior that couldn't safely be triggered on a live system, such as
+the 429 response. "✅" means an automated test in `tests/test_parity.py` or
+`tests/test_integration.py` checks the behavior. "⏳" means it is covered only by Phase 2
+shadow testing against real hosts.
 
-| # | Olla feature (as configured today) | Consumed by | llm-head |
+| # | Olla feature | Consumed by | Status |
 |---|---|---|---|
-| P1 | `:40114`, bind `0.0.0.0` | all clients | same |
-| P2 | `/olla/ollama/api/*` passthrough (generate, chat, embed/embeddings, tags, show, ps, …), NDJSON streaming | batch jobs, home-automation agent, local RAG and chat services | same paths, byte-for-byte relay |
-| P3 | `/olla/ollama/v1/*` OpenAI-compatible passthrough | no known client; kept because it's a cheap passthrough (Ollama serves it natively) | same |
-| P4 | `/olla/models` (OpenAI-shaped, per-endpoint availability) | agents | same shape |
-| P5 | `/internal/health`, `/internal/status`, `/internal/status/endpoints`, `/internal/status/models`, `/internal/process`, `/version` | dashboard, monitoring health checks | same JSON shapes, plus added fields (queue depth, loaded models) |
-| P6 | Anthropic translation (`translation_anthropic`, experimental) | no known client | **out of scope for v1**. During shadow testing, log any request to a route llm-head doesn't implement, then decide. |
-| P7 | CORS: `*` origins, GET/POST/OPTIONS, all headers, max-age 3600 | browser widgets | same |
-| P8 | Rate limits: 1000/min global, 100/min per IP, 1000/min health, burst 50, 200/min per endpoint; trusted proxy CIDRs | all | same values, same 429 behavior |
-| P9 | Request limits: 100 MB body, 1 MB headers | vision uploads (qwen2.5vl) | same |
-| P10 | Timeouts: 10 s header read, 120 s response header, 15 m response, 10 m read | long gpt-oss jobs | same, plus the new queue `max_wait` and stall detection |
-| P11 | Retry on connection failure | all | improved (§4.5) |
-| P12 | Health checks (2 s interval), recovery triggers model rediscovery | dashboard | same, with fixed timeouts |
-| P13 | Model discovery every 5 m, **model name unification** (e.g. names are lower-cased, as in `qwen2.5vl:7b-q4_k_m`), strict routing only to hosts that have the model | all | same normalization rules |
-| P14 | Response headers `X-Olla-Endpoint`, `X-Olla-Model`, `X-Olla-Request-ID`, `X-Olla-Response-Time`, `X-Olla-Backend-Type` | debugging, possibly clients | same headers |
-| P15 | JSON log to `/opt/olla/logs/olla.log`, rotated and gzipped; messages `Access log`, `Request dispatching`, `Request completed` (with `ttft_ms`, `tokens_per_sec`, tokens), `Request failed`, `Endpoint status changed` | dashboard `/logs/*`, this analysis | same messages and fields, plus new `Request queued` and `Model placed` |
-| P16 | systemd unit with `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome=true` | ops | same |
-
-Step 1 of the build is capturing a request corpus: sample traffic from each client with
-prompts replaced. The contract tests replay that corpus against both services.
+| P1 | `:40114`, bind `0.0.0.0` | all clients | ✅ config defaults |
+| P2 | `/olla/ollama/api/*` forwarded, NDJSON streaming, body passed **byte for byte** (Olla lowercases the model name for routing only) | all clients | ✅ |
+| P3 | `/olla/ollama/v1/*` OpenAI-compatible passthrough | no known client | ✅ |
+| P4 | `/olla/models` (OpenAI-shaped, per-endpoint availability) | agents | ✅ every field; availability can also read `loaded` |
+| P5 | `/internal/health`, `/internal/status`, `/internal/status/endpoints`, `/internal/status/models` | dashboard, monitoring | ✅ every Olla field present, plus queue depth, loaded models, GPU memory and in-flight counts |
+| P5b | `/internal/process`, `/version` | nothing known | Different: they describe Olla's Go runtime and build, so llm-head reports its own |
+| P6 | Anthropic translation (`/olla/anthropic/*`) | no known client | Out of scope for v1; those paths return 404 |
+| P7 | CORS: preflight 204 with the same headers, `Vary`, and exposed `X-Olla-*` headers | browser widgets | ✅ |
+| P8 | Rate limits: token bucket per IP and global, burst 50; applies to proxied routes only; `429 Too Many Requests` as text with `Retry-After` and `X-RateLimit-*` | all | ✅. `health_requests_per_minute` and `per_endpoint` are accepted but ignored, as in Olla |
+| P9 | Request limits: `413 Request body too large`, `431 Request headers too large` | vision uploads | ✅ |
+| P10 | Timeouts | long gpt-oss jobs | ✅ plus the queue's `max_wait` and stall detection. Olla never enforced `response_timeout`; llm-head does |
+| P11 | Retry: connection errors, one attempt per host, never after streaming starts | all | ✅ also retries 502/503/504 received before any response body, but those don't count against the host's health |
+| P12 | Health checks, recovery triggers model rediscovery | dashboard | ✅ 5 s interval, 3 s timeout, offline after 3 consecutive failures instead of Olla's backoff |
+| P13 | Case-insensitive model matching; strict routing to hosts that have the model; `404 No ollama endpoints available` | all | ✅ also matches an untagged name to `:latest`, which Olla 404s |
+| P14 | Response headers `X-Olla-*`, `Via`, `X-Served-By`, `X-RateLimit-*`; model and routing headers only when a model was named | debugging | ✅ `X-Olla-Routing-Reason` gives the placement reason; new `X-Llm-Head-Queue-Ms` and `X-Llm-Head-Cold-Load` |
+| P15 | JSON log to `/opt/olla/logs/olla.log`, 1 MB rotation, 7 gzipped backups named in UTC; `Access log`, `Request received`/`dispatching`/`completed`/`failed`, `Endpoint status changed` | dashboard `/logs/*` | ✅ every Olla field, plus `Request queued`, `Evicting model`, `Warming model`, and `placement`/`queued_ms` on dispatch and completion |
+| P16 | systemd unit hardening | ops | ✅ `examples/llm-head.service`, which also runs `check-config` before starting |
+| P17 | `api/pull`, `push`, `create`, `copy`, `delete`, `list` → `501` with Olla's text | none | ✅ |
+| P18 | `api/show` → Olla returns `501` | none | Different: forwarded to a host that has the model |
+| P19 | Client `X-Request-ID` reused if printable and ≤ 128 characters | tracing | ✅ |
 
 ## 6. Rollout plan
 
@@ -247,14 +252,39 @@ prompts replaced. The contract tests replay that corpus against both services.
   2. The restart tooling has to wait for zero requests in flight (`drain`, §4.5), not
      just report the count.
 
-**Phase 1: build llm-head (Python: FastAPI, httpx, uvicorn, single process)**
+**Phase 1: build llm-head (Python: Starlette, httpx, uvicorn, single process)**
 - Python because the existing dashboard uses it, and at about 1,200 requests a day async
-  Python has plenty of headroom.
-- Modules: `api/` (Olla-compatible routes), `state/` (poller and in-flight counts),
-  `sched/` (queues and placement), `relay/` (streaming and retry), `obslog/` (Olla log
-  schema).
-- Tests: unit tests for placement against recorded `/api/ps` snapshots, plus the parity
-  suite from §5.
+  Python has plenty of headroom. Starlette rather than FastAPI because the proxy streams
+  raw bytes and needs no request models.
+- Modules:
+  - `placement.py`: pure decision function (§4.3).
+  - `scheduler.py`: the queue.
+  - `cluster.py`: health checks and polling, plus in-flight counts.
+  - `relay.py`: streaming, retries and stall detection.
+  - `app.py` and `middleware.py`: the Olla-compatible API.
+  - `obslog.py`: Olla's log format.
+- Tests:
+  - placement unit tests using real `/api/ps` sizes;
+  - scheduler ordering tests;
+  - integration tests against `tests/fake_ollama.py`, which simulates GPU memory, load
+    time, LRU eviction, `NUM_PARALLEL` and CPU spill;
+  - the parity suite from §5.
+
+*Status 2026-09-30:* built, with 72 tests passing on three consecutive runs. The
+integration tests reproduce the problems from §2:
+- ties alternating between hosts;
+- no more than `slots_per_model` requests sent to a host at once;
+- gpt-oss not spilling onto the CPU beside a busy model;
+- a slow health check not marking a host offline;
+- an HTTP 503 from Ollama not counting against the host.
+
+Two bugs were found and fixed while writing the tests:
+- **Eviction chose too many models.** It evicted least-recently-used first, which removed
+  two models when removing one would have made room. It now searches for the cheapest
+  set of idle models to evict.
+- **`keep_warm` could block a request forever.** It was treated as "never evict," so a
+  request that needed that memory waited indefinitely. It is now a strong preference: a
+  cost penalty, not a veto.
 
 **Phase 2: shadow testing, then cutover**
 - Run on `:40115` and replay the corpus. Compare logs for a week of synthetic load.
