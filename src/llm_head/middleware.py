@@ -188,7 +188,11 @@ class LimitsMiddleware:
         async def send_logged(message):
             if message["type"] == "http.response.start":
                 status_box["status"] = message["status"]
-                message = dict(message, headers=list(message.get("headers") or []) + rl_headers)
+                out = list(message.get("headers") or []) + rl_headers
+                # Olla sets X-Olla-Request-Id on every response except a 429.
+                if message["status"] != 429 and not any(k.lower() == b"x-olla-request-id" for k, _ in out):
+                    out.append((b"x-olla-request-id", rid.encode()))
+                message = dict(message, headers=out)
             elif message["type"] == "http.response.body":
                 status_box["bytes"] += len(message.get("body", b""))
             await send(message)

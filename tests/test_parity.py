@@ -192,3 +192,13 @@ async def test_request_log_fields_match_olla(msg):
     # "timestamp" is added by EventLog when writing; "compatible_endpoints" is an Olla internal.
     missing = set(olla_line) - set(ours) - {"level", "timestamp", "compatible_endpoints"}
     assert not missing, missing
+
+
+@pytest.mark.parametrize("path", ["/internal/health", "/internal/status", "/internal/status/endpoints",
+                                  "/internal/status/models", "/olla/models", "/version"])
+async def test_every_response_carries_a_request_id(path):
+    """Found by shadow_compare against live Olla on 2026-09-30."""
+    assert "X-Olla-Request-Id" in FIXTURE.get(f"GET {path}", {"headers": {"X-Olla-Request-Id": "x"}})["headers"]
+    async with cluster() as (c, head, fakes, log):
+        r = await c.get(path)
+    assert len(r.headers.get_list("x-olla-request-id")) == 1
