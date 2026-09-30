@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Nagios/Icinga plugin: prove an Ollama host can actually serve models, not just that it
+answers HTTP.
+
+On 2026-09-30 Ollama on one host stopped loading models for 5 hours. GET / kept returning
+200, so every health check stayed green while requests needing a load hung forever.
+
+This plugin sends a 1-token generate request directly to the host:
+
+  --model M        always probed. Pick a small model: if it isn't loaded, the probe
+                   loads it, which is exactly the capability being checked.
+  --loaded         also probe every model currently in /api/ps, at the context size it
+                   is loaded with, so the probe never forces a reload or evicts anything.
+
+A probe that doesn't answer within --timeout is CRITICAL.
+
+    check_ollama_models --host http://gpu1.lan:11434 --model llama3.2:3b --loaded
+
+Exit codes: 0 OK, 2 CRITICAL, 3 UNKNOWN.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+OK, CRITICAL, UNKNOWN = 0, 2, 3
+LABELS = {OK: "OK", CRITICAL: "CRITICAL", UNKNOWN: "UNKNOWN"}
+
+
+def post(url: str, body: dict, timeout: float) -> dict:
+    req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument("--host", required=True, help="Ollama base URL, e.g. http://gpu1.lan:11434")
+    p.add_argument("--model", action="append", default=[], help="model to always probe (repeatable)")
+    p.add_argument("--loaded", action="store_true", help="also probe every currently loaded model")
+    p.add_argument("--timeout", type=float, default=45.0, help="seconds per probe")
+    a = p.parse_args()
+    base = a.host.rstrip("/")
+
+    probes: dict[str, int | None] = {m: None for m in a.model}  # model -> num_ctx (None = default)
+    if a.loaded:
+        try:
+            with urllib.request.urlopen(base + "/api/ps", timeout=10) as r:
+                for m in json.load(r).get("models") or []:
+                    probes[m["name"]] = m.get("context_length")
+        except Exception as exc:
+            print(f"OLLAMA CRITICAL - {base}: /api/ps failed: {exc}")
+            sys.exit(CRITICAL)
+    if not probes:
+        print("OLLAMA UNKNOWN - nothing to probe: give --model and/or --loaded")
+        sys.exit(UNKNOWN)
+
+    failures, results, perf = [], [], []
+    for model, ctx in probes.items():
+        body = {"model": model, "prompt": "ok", "stream": False, "keep_alive": "30m",
+                "options": {"num_predict": 1}}
+        if ctx:
+            body["options"]["num_ctx"] = ctx
+        if "embed" in model:
+            body = {"model": model, "input": "ok", "keep_alive": "30m"}
+        path = "/api/embed" if "embed" in model else "/api/generate"
+        t0 = time.monotonic()
+        try:
+            post(base + path, body, a.timeout)
+            dt = time.monotonic() - t0
+            results.append(f"{model} {dt:.1f}s")
+        except urllib.error.HTTPError as exc:
+            dt = time.monotonic() - t0
+            failures.append(f"{model}: HTTP {exc.code} {exc.read()[:80].decode(errors='replace')}")
+        except Exception as exc:
+            dt = time.monotonic() - t0
+            failures.append(f"{model}: no answer in {dt:.0f}s ({type(exc).__name__})")
+        label = model.replace(":", "_").replace("/", "_")
+        perf.append(f"'{label}'={dt:.2f}s;;{a.timeout:.0f}")
+
+    if failures:
+        print(f"OLLAMA CRITICAL - {base}: " + "; ".join(failures) + " | " + " ".join(perf))
+        sys.exit(CRITICAL)
+    print(f"OLLAMA OK - {base}: " + ", ".join(results) + " | " + " ".join(perf))
+    sys.exit(OK)
+
+
+if __name__ == "__main__":
+    main()

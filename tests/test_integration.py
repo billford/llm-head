@@ -152,6 +152,8 @@ async def test_queue_timeout_returns_503_with_retry_after():
         assert int(r.headers["retry-after"]) >= 1
         assert r.json()["reason"] == "queue_timeout"
         await asyncio.gather(*busy)
+        # Monitoring watches this counter; client-visible failures must show up in it.
+        assert (await c.get("/internal/status")).json()["system"]["total_failures"] >= 1
 
 
 async def test_drain_stops_new_work_on_a_host():

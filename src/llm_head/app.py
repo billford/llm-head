@@ -528,7 +528,9 @@ async def internal_status(request: Request) -> Response:
             "security_violations": head.app_state.rate_limited + head.app_state.size_limited,
             "status": "healthy" if up else "unhealthy",
             "success_rate": fmt.pct(total_req - total_fail, total_req),
-            "total_failures": total_fail,
+            # Every request whose client saw a failure: 5xx, queue timeout, failed or
+            # abandoned stream. Monitoring alerts on its growth between checks.
+            "total_failures": head.total_failures,
             "total_requests": total_req,
             "total_traffic": fmt.size(sum(h.traffic_bytes for h in hosts)),
             "uptime": fmt.uptime(time.time() - head.started),

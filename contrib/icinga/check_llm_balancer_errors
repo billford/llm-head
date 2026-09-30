@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Nagios/Icinga plugin: alert when an LLM balancer (Olla or llm-head) starts failing
+requests.
+
+Reads the running totals in GET <url>/internal/status (system.total_requests and
+system.total_failures) and compares them with the previous run, saved in a state file.
+The failure count since the last check decides the state, so an outage alerts within
+one check interval, and clears on the first clean interval afterwards.
+
+A green health check isn't enough: on 2026-09-30 an Ollama host stopped loading models
+for 5 hours while every health check passed, and 133 requests failed through the
+balancer without an alert.
+
+    check_llm_balancer_errors --url http://127.0.0.1:40114 --name olla -w 1 -c 5
+
+Exit codes: 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import tempfile
+import urllib.request
+
+OK, WARNING, CRITICAL, UNKNOWN = 0, 1, 2, 3
+LABELS = {OK: "OK", WARNING: "WARNING", CRITICAL: "CRITICAL", UNKNOWN: "UNKNOWN"}
+
+
+def finish(code: int, msg: str, perf: str = "") -> None:
+    print(f"LLM {LABELS[code]} - {msg}" + (f" | {perf}" if perf else ""))
+    sys.exit(code)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument("--url", required=True, help="balancer base URL, e.g. http://127.0.0.1:40114")
+    p.add_argument("--name", required=True, help="label, also used for the state file")
+    p.add_argument("-w", "--warning", type=int, default=1, help="failures since last check for WARNING")
+    p.add_argument("-c", "--critical", type=int, default=5, help="failures since last check for CRITICAL")
+    p.add_argument("--state-dir", default=os.environ.get("TMPDIR", "/var/tmp"))
+    p.add_argument("--timeout", type=float, default=10.0)
+    a = p.parse_args()
+
+    try:
+        with urllib.request.urlopen(a.url.rstrip("/") + "/internal/status", timeout=a.timeout) as r:
+            system = json.load(r)["system"]
+        total = int(system["total_requests"])
+        failed = int(system["total_failures"])
+    except Exception as exc:  # any failure to read the status is itself a problem
+        finish(CRITICAL, f"{a.name}: cannot read {a.url}/internal/status: {exc}")
+
+    state_path = os.path.join(a.state_dir, f"check_llm_balancer_errors.{a.name}.json")
+    try:
+        with open(state_path) as f:
+            prev = json.load(f)
+    except (OSError, ValueError):
+        prev = None
+
+    fd, tmp = tempfile.mkstemp(dir=a.state_dir, prefix=".llm-errors-")
+    with os.fdopen(fd, "w") as f:
+        json.dump({"total": total, "failed": failed}, f)
+    os.replace(tmp, state_path)
+
+    if prev is None or total < prev["total"] or failed < prev["failed"]:
+        # First run, or the balancer restarted and its counters reset.
+        finish(OK, f"{a.name}: baseline recorded ({total} requests, {failed} failed since start)",
+               f"new_requests=0 new_failures=0;{a.warning};{a.critical};0")
+
+    new_req = total - prev["total"]
+    new_fail = failed - prev["failed"]
+    perf = f"new_requests={new_req} new_failures={new_fail};{a.warning};{a.critical};0"
+    msg = f"{a.name}: {new_fail} failed of {new_req} requests since last check"
+    if new_fail >= a.critical:
+        finish(CRITICAL, msg, perf)
+    if new_fail >= a.warning:
+        finish(WARNING, msg, perf)
+    finish(OK, msg, perf)
+
+
+if __name__ == "__main__":
+    main()
