@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.log
+*.log.gz
+# local configs and captured traffic stay out of the repo
+config.local.yaml
+corpus/
