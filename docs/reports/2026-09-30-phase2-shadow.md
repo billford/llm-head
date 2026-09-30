@@ -82,6 +82,40 @@ Four real client requests arrived during the test window, 13:19 to 14:00 UTC. Al
 succeeded, but at a median of 2.0 s instead of the usual ~0.6 s, because they shared the
 GPUs with the tests.
 
+## Test 3: real-host scenarios (`tools/realhost_checks.py`)
+
+These cover what synthetic load doesn't: real image payloads, agent-style tool calls,
+disconnects, drain, long context, and overload.
+
+| Check | llm-head | Olla |
+|---|---|---|
+| 1920×1080 vision request, streaming, `num_ctx` 8192 (the photo classifier's request shape) | pass. **First attempt: 128 s** (stalled on xmas and retried on european). **After `4aec078`: 10.1 s**, reloaded at 8192 on an idle host | **502 after 120 s**, same stall on xmas |
+| gpt-oss tool call, continuing after the tool result, JSON-schema output | pass (3/3) | **tool call and schema both failed: 502 after 120 s** on xmas |
+| Client disconnects mid-stream: slot released | pass | not tested |
+| Drain a host: no new work goes there | pass | no drain feature |
+| 16k-context request (9,821 prompt tokens) | pass | not tested |
+| Burst of 12 requests: never more than 2 per host, the rest wait at the head | pass (peak 2 and 2, 8 waiting) | not tested |
+
+### Finding: context size is part of what "loaded" means
+
+Ollama has to reload a model to change `num_ctx`, and it waits until the loaded copy is
+idle to do it. The photo classifier runs its analyses at `num_ctx` 8192. Its warmup and
+health probe don't set `num_ctx`, so they keep qwen loaded at the default 4096, and every
+real analysis then needs a reload. On a host kept busy by other traffic, that reload can
+wait indefinitely.
+
+llm-head now treats context size as part of the loaded state:
+- a reload only goes to a host where the model is idle;
+- once one request has been starved past a threshold, later requests for that model
+  wait behind it (`4aec078`).
+
+### Incident during testing
+
+Around the time these tests ran, Ollama on xmas stopped loading models for 5 hours, and
+133 real requests failed through production Olla. See
+`2026-09-30-xmas-ollama-wedge.md`. llm-head now detects this (a load watchdog) and
+quarantines that model on that host.
+
 ## Caveats
 
 - Both balancers shared the GPUs with production traffic and with each other's leftover
@@ -93,7 +127,7 @@ GPUs with the tests.
 
 ## Recommendation
 
-Before cutover, run a **canary**: point one real client at `:40115` for 2–3 days. The
+Before cutover, run a **canary**, after upgrading xmas to Ollama 0.32.4: point one real client at `:40115` for 2–3 days. The
 Mac's batch job is the best candidate, since it sends 97% of traffic and isn't
 interactive. That tests real request bodies (images, tool calls) and real traffic
 patterns while Home Assistant and the lampoon services stay on Olla. Cut over once the
