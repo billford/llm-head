@@ -177,7 +177,7 @@ removes the remaining conflict, since gpt-oss can then have a card to itself.
 
 ### 4.5 Failure handling
 
-- **Health.** Active checks every 2 s with a **3 s** timeout. A host is marked down after
+- **Health.** Active checks every 5 s with a **3 s** timeout. A host is marked down after
   **3 consecutive** failures. Passive signals count too: a connection refused or a 5xx
   response before the first byte counts as a failure. A host that is busy but responding
   is never marked down.
@@ -227,6 +227,25 @@ prompts replaced. The contract tests replay that corpus against both services.
 - In the Olla config: `check_timeout: 3s`.
 - Reboot european during a quiet period to clear the NVIDIA driver mismatch.
 - Expected result: fewer cold loads. The 2:1 skew and the CPU spill stay.
+
+*Done 2026-09-30. What happened:*
+- **Ollama settings applied on both hosts.** Previous overrides were backed up as
+  `override.conf.bak-20260930`. Checked on each host by calling Ollama directly:
+  - gpt-oss:20b uses 11.9 GB and runs entirely on the GPU at about 94.5 tokens/s, at
+    both 4k and 16k context. `NUM_PARALLEL=2` did not push it onto the CPU.
+  - qwen2.5vl and llama3.2:3b now stay loaded together, using 10 GB.
+- **Olla requires `check_timeout` to be shorter than `check_interval`.** The first restart
+  with `check_timeout: 3s` next to `check_interval: 2s` failed config validation, and
+  Olla restarted in a loop for about 20 s until the interval was raised to **5 s**. One
+  gpt-oss request in flight at the time was lost. Previous config:
+  `config.yaml.bak-20260930`.
+- **The european reboot wasn't needed.** It had already rebooted about 5 days earlier,
+  and its driver and library versions both read 595.91.07.
+- **Lessons for llm-head:**
+  1. Validate config before applying it. A bad config must be rejected while the running
+     process keeps serving, never discovered by a crash on restart.
+  2. The restart tooling has to wait for zero requests in flight (`drain`, §4.5), not
+     just report the count.
 
 **Phase 1: build llm-head (Python: FastAPI, httpx, uvicorn, single process)**
 - Python because the existing dashboard uses it, and at about 1,200 requests a day async
