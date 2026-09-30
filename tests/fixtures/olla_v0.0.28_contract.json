@@ -1,0 +1,1616 @@
+{
+ "GET /internal/health": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "20",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "gentle-humming-597a"
+  },
+  "json": {
+   "status": "healthy"
+  },
+  "method": "GET",
+  "path": "/internal/health",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /internal/process": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "633",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "vicuna-galloping-e0fe"
+  },
+  "json": {
+   "allocations": {
+    "net_objects": 12970,
+    "total_frees": 1729607,
+    "total_mallocs": 1742577
+   },
+   "garbage_collection": {
+    "avg_gc_pause": "57.128\u00b5s",
+    "gc_cpu_fraction": 9.117001153853123e-07,
+    "last_gc": "2026-09-30T12:21:16Z",
+    "num_gc_cycles": 420,
+    "total_gc_time": "23.993853ms"
+   },
+   "goroutines": {
+    "cgo_calls": 0,
+    "count": 24,
+    "health_status": "HEALTHY"
+   },
+   "memory": {
+    "heap_alloc": "2.23 MB",
+    "heap_inuse": "4.25 MB",
+    "heap_released": "5.29 MB",
+    "heap_sys": "10.47 MB",
+    "memory_pressure": "LOW",
+    "stack_inuse": "1.53 MB",
+    "total_alloc": "337.25 MB"
+   },
+   "runtime": {
+    "go_version": "go1.24.13",
+    "gomaxprocs": 32,
+    "num_cpu": 32,
+    "uptime": "12h11m22s"
+   },
+   "timestamp": "2026-09-30T12:21:16.834278676Z"
+  },
+  "method": "GET",
+  "path": "/internal/process",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /internal/status": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "1076",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "steady-grazing-ceec"
+  },
+  "json": {
+   "endpoints": [
+    {
+     "avg_latency": "649ms",
+     "connections": 0,
+     "issues": "",
+     "last_check": "22s ago",
+     "models": {
+      "count": 11,
+      "last_updated": "2026-09-30T12:19:53.955682043Z"
+     },
+     "name": "xmas",
+     "next_check": "now",
+     "priority": 100,
+     "requests": 328,
+     "status": "healthy",
+     "success_rate": "100%",
+     "traffic": "432.06 KB"
+    },
+    {
+     "avg_latency": "668ms",
+     "connections": 0,
+     "issues": "",
+     "last_check": "22s ago",
+     "models": {
+      "count": 11,
+      "last_updated": "2026-09-30T12:19:53.954780238Z"
+     },
+     "name": "european",
+     "next_check": "now",
+     "priority": 100,
+     "requests": 171,
+     "status": "healthy",
+     "success_rate": "100%",
+     "traffic": "149.89 KB"
+    }
+   ],
+   "proxy": {
+    "balancer": "least-connections",
+    "engine": "olla",
+    "profile": "auto"
+   },
+   "security": {
+    "blocked_ips": 0,
+    "status": "normal",
+    "violations": {
+     "rate_limits": 0,
+     "size_limits": 0
+    }
+   },
+   "system": {
+    "active_connections": 0,
+    "avg_latency": "655ms",
+    "commit": "e1e44429de0a6a7dbfa9e99a615a6faaf5548f11",
+    "endpoints_up": "2/2",
+    "security_violations": 0,
+    "status": "healthy",
+    "success_rate": "100%",
+    "total_failures": 0,
+    "total_requests": 499,
+    "total_traffic": "581.94 KB",
+    "uptime": "12h 11m",
+    "version": "v0.0.28"
+   },
+   "timestamp": "2026-09-30T12:21:16.832908154Z"
+  },
+  "method": "GET",
+  "path": "/internal/status",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /internal/status/endpoints": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "516",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "gentle-galloping-0f88"
+  },
+  "json": {
+   "endpoints": [
+    {
+     "health_check": "22s ago",
+     "last_model_sync": "1m ago",
+     "model_count": 11,
+     "name": "xmas",
+     "priority": 100,
+     "request_count": 328,
+     "response_time": "0ms",
+     "status": "healthy",
+     "success_rate": "100%",
+     "type": "ollama"
+    },
+    {
+     "health_check": "22s ago",
+     "last_model_sync": "1m ago",
+     "model_count": 11,
+     "name": "european",
+     "priority": 100,
+     "request_count": 171,
+     "response_time": "0ms",
+     "status": "healthy",
+     "success_rate": "100%",
+     "type": "ollama"
+    }
+   ],
+   "healthy_count": 2,
+   "routable_count": 2,
+   "timestamp": "2026-09-30T12:21:16.833407542Z",
+   "total_count": 2
+  },
+  "method": "GET",
+  "path": "/internal/status/endpoints",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /internal/status/models": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "1897",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "fluffy-following-5bdf"
+  },
+  "json": {
+   "models_by_family": {
+    "gptoss": [
+     "gpt-oss:20b"
+    ],
+    "llama": [
+     "llama3.1:8b",
+     "llama3.2:1b",
+     "llama3.2:3b",
+     "llava:latest",
+     "writingstyle-lora:v1",
+     "writingstyle-lora:v2",
+     "writingstyle-lora:v3"
+    ],
+    "mllama": [
+     "llama3.2-vision:latest"
+    ],
+    "nomic-bert": [
+     "nomic-embed-text:latest"
+    ],
+    "qwen25vl": [
+     "qwen2.5vl:7b-q4_K_M"
+    ]
+   },
+   "recent_models": [
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "mllama",
+     "last_seen": "1m ago",
+     "name": "llama3.2-vision:latest",
+     "params": "10.7B",
+     "quant": "Q4_K_M",
+     "size": "7.28 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "llama",
+     "last_seen": "1m ago",
+     "name": "llama3.1:8b",
+     "params": "8.0B",
+     "quant": "Q4_K_M",
+     "size": "4.58 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "llama",
+     "last_seen": "1m ago",
+     "name": "llava:latest",
+     "params": "7B",
+     "quant": "Q4_0",
+     "size": "4.41 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "qwen25vl",
+     "last_seen": "1m ago",
+     "name": "qwen2.5vl:7b-q4_K_M",
+     "params": "8.3B",
+     "quant": "Q4_K_M",
+     "size": "5.56 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "gptoss",
+     "last_seen": "1m ago",
+     "name": "gpt-oss:20b",
+     "params": "20.9B",
+     "quant": "MXFP4",
+     "size": "12.85 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "llama",
+     "last_seen": "1m ago",
+     "name": "llama3.2:1b",
+     "params": "1.2B",
+     "quant": "Q8_0",
+     "size": "1.23 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "llama",
+     "last_seen": "1m ago",
+     "name": "llama3.2:3b",
+     "params": "3.2B",
+     "quant": "Q4_K_M",
+     "size": "1.88 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "llama",
+     "last_seen": "1m ago",
+     "name": "writingstyle-lora:v2",
+     "params": "8.0B",
+     "quant": "Q8_0",
+     "size": "7.95 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "llama",
+     "last_seen": "1m ago",
+     "name": "writingstyle-lora:v3",
+     "params": "8.0B",
+     "quant": "Q8_0",
+     "size": "7.95 GB"
+    },
+    {
+     "endpoints": [
+      "european",
+      "xmas"
+     ],
+     "family": "nomic-bert",
+     "last_seen": "1m ago",
+     "name": "nomic-embed-text:latest",
+     "params": "137M",
+     "quant": "F16",
+     "size": "261.60 MB"
+    }
+   ],
+   "timestamp": "2026-09-30T12:21:16.833795888Z",
+   "total_endpoints": 2,
+   "total_families": 5,
+   "total_models": 11
+  },
+  "method": "GET",
+  "path": "/internal/status/models",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /nonexistent": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "19",
+   "Content-Type": "text/plain; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Content-Type-Options": "nosniff"
+  },
+  "json": null,
+  "method": "GET",
+  "path": "/nonexistent",
+  "request": null,
+  "status": 404,
+  "text": "404 page not found\n"
+ },
+ "GET /olla/models": {
+  "headers": {
+   "Connection": "close",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Transfer-Encoding": "chunked",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "woolly-spitting-f506"
+  },
+  "json": {
+   "data": [
+    {
+     "created": 1790770876,
+     "id": "writingstyle-lora:v1",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "writingstyle-lora:v1"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization": "q8",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.1:8b",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "llama3.1:8b"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "code",
+       "text-generation"
+      ],
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization": "q4km",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "writingstyle-lora:v2",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "writingstyle-lora:v2"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization": "q8",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.2-vision:latest",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "llama3.2-vision:latest"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "vision",
+       "multimodal",
+       "image-understanding",
+       "text-generation"
+      ],
+      "family": "mllama",
+      "parameter_size": "10.7b",
+      "quantization": "q4km",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "gpt-oss:20b",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "gpt-oss:20b"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "gptoss",
+      "parameter_size": "20.9b",
+      "quantization": "f4",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.2:1b",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "llama3.2:1b"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "llama",
+      "parameter_size": "1.2b",
+      "quantization": "q8",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "writingstyle-lora:v3",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "writingstyle-lora:v3"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization": "q8",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llava:latest",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "llava:latest"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "multimodal",
+       "image-understanding",
+       "text-generation",
+       "vision"
+      ],
+      "family": "llama",
+      "parameter_size": "7b",
+      "quantization": "q4",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.2:3b",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "llama3.2:3b"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "llama",
+      "parameter_size": "3.2b",
+      "quantization": "q4km",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "nomic-embed-text:latest",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "nomic-embed-text:latest"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "nomic-bert",
+      "parameter_size": "137m",
+      "quantization": "f16",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "qwen2.5vl:7b-q4_K_M",
+     "object": "model",
+     "olla": {
+      "aliases": [
+       "qwen2.5vl:7b-q4_K_M"
+      ],
+      "availability": [
+       {
+        "endpoint": "european",
+        "state": "available"
+       },
+       {
+        "endpoint": "xmas",
+        "state": "available"
+       }
+      ],
+      "capabilities": [
+       "text-generation"
+      ],
+      "family": "qwen25vl",
+      "parameter_size": "8.3b",
+      "quantization": "q4km",
+      "variant": ""
+     },
+     "owned_by": "olla"
+    }
+   ],
+   "object": "list"
+  },
+  "method": "GET",
+  "path": "/olla/models",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /olla/ollama/api/nope": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "18",
+   "Content-Type": "text/plain",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "xmas",
+   "X-Olla-Request-Id": "shaggy-alerting-9c47",
+   "X-Olla-Response-Time": "0ms",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "97",
+   "X-Ratelimit-Reset": "1790770936",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": null,
+  "method": "GET",
+  "path": "/olla/ollama/api/nope",
+  "request": null,
+  "status": 404,
+  "text": "404 page not found"
+ },
+ "GET /olla/ollama/api/ps": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "770",
+   "Content-Type": "application/json; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "xmas",
+   "X-Olla-Request-Id": "proud-carrying-f2b6",
+   "X-Olla-Response-Time": "4ms",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "99",
+   "X-Ratelimit-Reset": "1790770936",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": {
+   "models": [
+    {
+     "context_length": 4096,
+     "details": {
+      "families": [
+       "qwen25vl"
+      ],
+      "family": "qwen25vl",
+      "format": "gguf",
+      "parameter_size": "8.3B",
+      "parent_model": "",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "5ced39dfa4bac325dc183dd1e4febaa1c46b3ea28bce48896c8e69c1e79611cc",
+     "expires_at": "2026-09-30T12:47:22.317392416Z",
+     "model": "qwen2.5vl:7b-q4_K_M",
+     "name": "qwen2.5vl:7b-q4_K_M",
+     "size": 5864591195,
+     "size_vram": 5864591195
+    },
+    {
+     "context_length": 4096,
+     "details": {
+      "families": [
+       "llama"
+      ],
+      "family": "llama",
+      "format": "gguf",
+      "parameter_size": "3.2B",
+      "parent_model": "",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72",
+     "expires_at": "2026-09-30T12:46:59.858753252Z",
+     "model": "llama3.2:3b",
+     "name": "llama3.2:3b",
+     "size": 3097881476,
+     "size_vram": 3097881476
+    }
+   ]
+  },
+  "method": "GET",
+  "path": "/olla/ollama/api/ps",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /olla/ollama/api/tags": {
+  "headers": {
+   "Connection": "close",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Transfer-Encoding": "chunked",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "silky-resting-df61"
+  },
+  "json": {
+   "models": [
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "a027e57e6e8a1e467c0a0584593ea2176a9b23513bf76612e125079f177b23d6",
+     "model": "writingstyle-lora:v1",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "writingstyle-lora:v1",
+     "size": 8540771764
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+     "model": "llama3.1:8b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.1:8b",
+     "size": 4920753328
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "06fd6a6fb52f27b05057081539241bb0ea39e239effb91abd903b8c9aced8fb6",
+     "model": "writingstyle-lora:v2",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "writingstyle-lora:v2",
+     "size": 8540771764
+    },
+    {
+     "details": {
+      "family": "mllama",
+      "parameter_size": "10.7b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "6f2f9757ae97e8a3f8ea33d6adb2b11d93d9a35bef277cd2c0b1b5af8e8d0b1e",
+     "model": "llama3.2-vision:latest",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.2-vision:latest",
+     "size": 7816589186
+    },
+    {
+     "details": {
+      "family": "gptoss",
+      "parameter_size": "20.9b",
+      "quantization_level": "f4"
+     },
+     "digest": "17052f91a42e97930aa6e28a6c6c06a983e6a58dbb00434885a0cf5313e376f7",
+     "model": "gpt-oss:20b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "gpt-oss:20b",
+     "size": 13793441244
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "1.2b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "baf6a787fdffd633537aa2eb51cfd54cb93ff08e28040095462bb63daf552878",
+     "model": "llama3.2:1b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.2:1b",
+     "size": 1321098329
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "806934ebb174da6e7a1606b859085d72bd48153a378fa7cff1b27a272db5a322",
+     "model": "writingstyle-lora:v3",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "writingstyle-lora:v3",
+     "size": 8540771764
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "7b",
+      "quantization_level": "Q4_0"
+     },
+     "digest": "8dd30f6b0cb19f555f2c7a7ebda861449ea2cc76bf1f44e262931f45fc81d081",
+     "model": "llava:latest",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llava:latest",
+     "size": 4733363377
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "3.2b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72",
+     "model": "llama3.2:3b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.2:3b",
+     "size": 2019393189
+    },
+    {
+     "details": {
+      "family": "nomic-bert",
+      "parameter_size": "137m",
+      "quantization_level": "F16"
+     },
+     "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+     "model": "nomic-embed-text:latest",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "nomic-embed-text:latest",
+     "size": 274302450
+    },
+    {
+     "details": {
+      "family": "qwen25vl",
+      "parameter_size": "8.3b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "5ced39dfa4bac325dc183dd1e4febaa1c46b3ea28bce48896c8e69c1e79611cc",
+     "model": "qwen2.5vl:7b-q4_K_M",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "qwen2.5vl:7b-q4_K_M",
+     "size": 5969245856
+    }
+   ]
+  },
+  "method": "GET",
+  "path": "/olla/ollama/api/tags",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /olla/ollama/api/version": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "20",
+   "Content-Type": "application/json; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "xmas",
+   "X-Olla-Request-Id": "gentle-humming-8e7b",
+   "X-Olla-Response-Time": "0ms",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "98",
+   "X-Ratelimit-Reset": "1790770936",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": {
+   "version": "0.32.3"
+  },
+  "method": "GET",
+  "path": "/olla/ollama/api/version",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /olla/ollama/v1/models": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "933",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "huacaya-carrying-275b"
+  },
+  "json": {
+   "data": [
+    {
+     "created": 1790770876,
+     "id": "writingstyle-lora:v1",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.1:8b",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "writingstyle-lora:v2",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.2-vision:latest",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "gpt-oss:20b",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.2:1b",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "writingstyle-lora:v3",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llava:latest",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "llama3.2:3b",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "nomic-embed-text:latest",
+     "object": "model",
+     "owned_by": "olla"
+    },
+    {
+     "created": 1790770876,
+     "id": "qwen2.5vl:7b-q4_K_M",
+     "object": "model",
+     "owned_by": "olla"
+    }
+   ],
+   "object": "list"
+  },
+  "method": "GET",
+  "path": "/olla/ollama/v1/models",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET /version": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "980",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:16 GMT",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "huacaya-following-6937"
+  },
+  "json": {
+   "api": {
+    "endpoints": {
+     "health": "/internal/health",
+     "process": "/internal/process",
+     "status": "/internal/status",
+     "version": "/version"
+    },
+    "version": "v1"
+   },
+   "build": {
+    "commit": "e1e44429de0a6a7dbfa9e99a615a6faaf5548f11",
+    "date": "2026-06-13T23:55:47Z",
+    "go_version": "Go 1.2x.0",
+    "platform": "linux/amd64"
+   },
+   "capabilities": [
+    "load_balancing",
+    "health_checking",
+    "rate_limiting",
+    "model_unification",
+    "endpoint_discovery",
+    "message_translation",
+    "translation_anthropic",
+    "passthrough_anthropic"
+   ],
+   "capabilities_experimental": [
+    "translation_anthropic",
+    "passthrough_anthropic"
+   ],
+   "description": "The AI Proxy for your LLMs",
+   "edition": "Community",
+   "links": {
+    "documentation": "https://github.com/thushan/olla#readme",
+    "homepage": "https://github.com/thushan/olla",
+    "releases": "https://github.com/thushan/olla/releases/latest"
+   },
+   "name": "Olla",
+   "supported_backends": [
+    "ollama",
+    "lemonade",
+    "litellm",
+    "llamacpp",
+    "lmdeploy",
+    "lm_studio",
+    "omlx",
+    "sglang",
+    "vllm",
+    "vllm-mlx",
+    "openai_compatible",
+    "docker-model-runner"
+   ],
+   "version": "v0.0.28"
+  },
+  "method": "GET",
+  "path": "/version",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "GET with Origin": {
+  "headers": {
+   "Access-Control-Allow-Origin": "*",
+   "Access-Control-Expose-Headers": "X-Olla-Request-Id, X-Olla-Endpoint, X-Olla-Backend-Type, X-Olla-Model, X-Olla-Response-Time, X-Olla-Routing-Strategy, X-Olla-Routing-Decision, X-Olla-Routing-Reason, X-Olla-Mode, X-Olla-Sticky-Session, X-Olla-Sticky-Key-Source, X-Olla-Session-Id",
+   "Connection": "close",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:23 GMT",
+   "Transfer-Encoding": "chunked",
+   "Vary": "Origin",
+   "X-Olla-Request-Id": "vicuna-grazing-3a49"
+  },
+  "json": {
+   "models": [
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "a027e57e6e8a1e467c0a0584593ea2176a9b23513bf76612e125079f177b23d6",
+     "model": "writingstyle-lora:v1",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "writingstyle-lora:v1",
+     "size": 8540771764
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+     "model": "llama3.1:8b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.1:8b",
+     "size": 4920753328
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "06fd6a6fb52f27b05057081539241bb0ea39e239effb91abd903b8c9aced8fb6",
+     "model": "writingstyle-lora:v2",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "writingstyle-lora:v2",
+     "size": 8540771764
+    },
+    {
+     "details": {
+      "family": "mllama",
+      "parameter_size": "10.7b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "6f2f9757ae97e8a3f8ea33d6adb2b11d93d9a35bef277cd2c0b1b5af8e8d0b1e",
+     "model": "llama3.2-vision:latest",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.2-vision:latest",
+     "size": 7816589186
+    },
+    {
+     "details": {
+      "family": "gptoss",
+      "parameter_size": "20.9b",
+      "quantization_level": "f4"
+     },
+     "digest": "17052f91a42e97930aa6e28a6c6c06a983e6a58dbb00434885a0cf5313e376f7",
+     "model": "gpt-oss:20b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "gpt-oss:20b",
+     "size": 13793441244
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "1.2b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "baf6a787fdffd633537aa2eb51cfd54cb93ff08e28040095462bb63daf552878",
+     "model": "llama3.2:1b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.2:1b",
+     "size": 1321098329
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "8b",
+      "quantization_level": "Q8_0"
+     },
+     "digest": "806934ebb174da6e7a1606b859085d72bd48153a378fa7cff1b27a272db5a322",
+     "model": "writingstyle-lora:v3",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "writingstyle-lora:v3",
+     "size": 8540771764
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "7b",
+      "quantization_level": "Q4_0"
+     },
+     "digest": "8dd30f6b0cb19f555f2c7a7ebda861449ea2cc76bf1f44e262931f45fc81d081",
+     "model": "llava:latest",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llava:latest",
+     "size": 4733363377
+    },
+    {
+     "details": {
+      "family": "llama",
+      "parameter_size": "3.2b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72",
+     "model": "llama3.2:3b",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "llama3.2:3b",
+     "size": 2019393189
+    },
+    {
+     "details": {
+      "family": "nomic-bert",
+      "parameter_size": "137m",
+      "quantization_level": "F16"
+     },
+     "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+     "model": "nomic-embed-text:latest",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "nomic-embed-text:latest",
+     "size": 274302450
+    },
+    {
+     "details": {
+      "family": "qwen25vl",
+      "parameter_size": "8.3b",
+      "quantization_level": "Q4_K_M"
+     },
+     "digest": "5ced39dfa4bac325dc183dd1e4febaa1c46b3ea28bce48896c8e69c1e79611cc",
+     "model": "qwen2.5vl:7b-q4_K_M",
+     "modified_at": "2026-09-30T12:19:53Z",
+     "name": "qwen2.5vl:7b-q4_K_M",
+     "size": 5969245856
+    }
+   ]
+  },
+  "method": "GET",
+  "path": "/olla/ollama/api/tags",
+  "request": null,
+  "status": 200,
+  "text": null
+ },
+ "OPTIONS preflight": {
+  "headers": {
+   "Access-Control-Allow-Headers": "content-type",
+   "Access-Control-Allow-Methods": "POST",
+   "Access-Control-Allow-Origin": "*",
+   "Access-Control-Max-Age": "3600",
+   "Connection": "close",
+   "Date": "Wed, 30 Sep 2026 12:21:23 GMT",
+   "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers"
+  },
+  "json": null,
+  "method": "OPTIONS",
+  "path": "/olla/ollama/api/chat",
+  "request": null,
+  "status": 204,
+  "text": ""
+ },
+ "POST bad json": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "76",
+   "Content-Type": "application/json; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:23 GMT",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "xmas",
+   "X-Olla-Request-Id": "guanaco-carrying-4925",
+   "X-Olla-Response-Time": "0ms",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "90",
+   "X-Ratelimit-Reset": "1790770943",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "status": 400,
+  "text": "{\"error\":\"invalid character 'n' looking for beginning of object key string\"}"
+ },
+ "POST chat nonstream": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "314",
+   "Content-Type": "application/json; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:17 GMT",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "xmas",
+   "X-Olla-Model": "llama3.2:3b",
+   "X-Olla-Request-Id": "huacaya-resting-dcfa",
+   "X-Olla-Response-Time": "174ms",
+   "X-Olla-Routing-Decision": "routed",
+   "X-Olla-Routing-Reason": "model_found",
+   "X-Olla-Routing-Strategy": "strict",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "94",
+   "X-Ratelimit-Reset": "1790770937",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": {
+   "created_at": "2026-09-30T12:21:17.454063326Z",
+   "done": true,
+   "done_reason": "length",
+   "eval_count": 5,
+   "eval_duration": 24270000,
+   "load_duration": 141619959,
+   "message": {
+    "content": "What's on your mind",
+    "role": "assistant"
+   },
+   "model": "llama3.2:3b",
+   "prompt_eval_count": 27,
+   "prompt_eval_duration": 6278000,
+   "total_duration": 173327710
+  },
+  "method": "POST",
+  "path": "/olla/ollama/api/chat",
+  "request": {
+   "messages": [
+    {
+     "content": "Say ok",
+     "role": "user"
+    }
+   ],
+   "model": "llama3.2:3b",
+   "options": {
+    "num_predict": 5
+   },
+   "stream": false
+  },
+  "status": 200,
+  "text": null
+ },
+ "POST embed": {
+  "headers": {
+   "Connection": "close",
+   "Content-Type": "application/json; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:22 GMT",
+   "Transfer-Encoding": "chunked",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "european",
+   "X-Olla-Model": "nomic-embed-text",
+   "X-Olla-Request-Id": "curly-browsing-1c1e",
+   "X-Olla-Response-Time": "5150ms",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "93",
+   "X-Ratelimit-Reset": "1790770937",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": {
+   "embeddings": [
+    [
+     0.017851371,
+     -0.005860681,
+     -0.1752581,
+     -0.01375161,
+     0.033998452,
+     0.044750396,
+     0.012444502,
+     -0.0025582311
+    ]
+   ],
+   "load_duration": 3787054505,
+   "model": "nomic-embed-text",
+   "prompt_eval_count": 3,
+   "total_duration": 5148160608
+  },
+  "method": "POST",
+  "path": "/olla/ollama/api/embed",
+  "request": {
+   "input": "hello",
+   "model": "nomic-embed-text"
+  },
+  "status": 200,
+  "text": null
+ },
+ "POST generate nonstream": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "453",
+   "Content-Type": "application/json; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:17 GMT",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "xmas",
+   "X-Olla-Model": "llama3.2:3b",
+   "X-Olla-Request-Id": "silky-browsing-45c2",
+   "X-Olla-Response-Time": "242ms",
+   "X-Olla-Routing-Decision": "routed",
+   "X-Olla-Routing-Reason": "model_found",
+   "X-Olla-Routing-Strategy": "strict",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "96",
+   "X-Ratelimit-Reset": "1790770936",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": {
+   "context": [
+    128006,
+    9125,
+    128007,
+    271,
+    38766,
+    1303,
+    33025,
+    2696
+   ],
+   "created_at": "2026-09-30T12:21:17.082990498Z",
+   "done": true,
+   "done_reason": "length",
+   "eval_count": 5,
+   "eval_duration": 25676000,
+   "load_duration": 168301436,
+   "model": "llama3.2:3b",
+   "prompt_eval_count": 27,
+   "prompt_eval_duration": 24093000,
+   "response": "Ok. How can I",
+   "total_duration": 241507059
+  },
+  "method": "POST",
+  "path": "/olla/ollama/api/generate",
+  "request": {
+   "model": "llama3.2:3b",
+   "options": {
+    "num_predict": 5
+   },
+   "prompt": "Say ok",
+   "stream": false
+  },
+  "status": 200,
+  "text": null
+ },
+ "POST generate stream": {
+  "headers": {
+   "Connection": "close",
+   "Content-Type": "application/x-ndjson",
+   "Date": "Wed, 30 Sep 2026 12:21:17 GMT",
+   "Transfer-Encoding": "chunked",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "xmas",
+   "X-Olla-Model": "llama3.2:3b",
+   "X-Olla-Request-Id": "suri-galloping-b68f",
+   "X-Olla-Response-Time": "172ms",
+   "X-Olla-Routing-Decision": "routed",
+   "X-Olla-Routing-Reason": "model_found",
+   "X-Olla-Routing-Strategy": "strict",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "95",
+   "X-Ratelimit-Reset": "1790770937",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": null,
+  "method": "POST",
+  "path": "/olla/ollama/api/generate",
+  "request": {
+   "model": "llama3.2:3b",
+   "options": {
+    "num_predict": 5
+   },
+   "prompt": "Say ok",
+   "stream": true
+  },
+  "status": 200,
+  "text": "{\"model\":\"llama3.2:3b\",\"created_at\":\"2026-09-30T12:21:17.25477328Z\",\"response\":\"What\",\"done\":false}\n{\"model\":\"llama3.2:3b\",\"created_at\":\"2026-09-30T12:21:17.260803434Z\",\"response\":\"'s\",\"done\":false}\n{\"model\":\"llama3.2:3b\",\"created_at\":\"2026-09-30T12:21:17.266857709Z\",\"response\":\" up\",\"done\":false}\n{\"model\":\"llama3.2:3b\",\"created_at\":\"2026-09-30T12:21:17.272953643Z\",\"response\":\"?\",\"done\":false}\n{\"model\":\"llama3.2:3b\",\"created_at\":\"2026-09-30T12:21:17.279145568Z\",\"response\":\"\",\"done\":true,\"done_reason\":\"stop\",\"context\":[128006,9125,128007,271,38766,1303,33025,2696,25,6790,220,2366,18,271,128009,128006,882,128007,271,46864,5509,128009,128006,78191,128007,271,3923,596,709,30],\"total_duration\":193996102,\"load_duration\":162350600,\"prompt_eval_count\":27,\"prompt_eval_duration\":6270000,\"eval_count\":5,\"eval_duration\":24212000}\n"
+ },
+ "POST openai chat": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "306",
+   "Content-Type": "application/json",
+   "Date": "Wed, 30 Sep 2026 12:21:23 GMT",
+   "Vary": "Origin",
+   "Via": "1.1 olla/v0.0.28",
+   "X-Olla-Backend-Type": "ollama",
+   "X-Olla-Endpoint": "european",
+   "X-Olla-Model": "llama3.2:3b",
+   "X-Olla-Request-Id": "shaggy-galloping-a8c2",
+   "X-Olla-Response-Time": "1251ms",
+   "X-Olla-Routing-Decision": "routed",
+   "X-Olla-Routing-Reason": "model_found",
+   "X-Olla-Routing-Strategy": "strict",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "92",
+   "X-Ratelimit-Reset": "1790770942",
+   "X-Served-By": "Olla/v0.0.28"
+  },
+  "json": {
+   "choices": [
+    {
+     "finish_reason": "length",
+     "index": 0,
+     "message": {
+      "content": "What's on your mind",
+      "role": "assistant"
+     }
+    }
+   ],
+   "created": 1790770883,
+   "id": "chatcmpl-300",
+   "model": "llama3.2:3b",
+   "object": "chat.completion",
+   "system_fingerprint": "fp_ollama",
+   "usage": {
+    "completion_tokens": 5,
+    "prompt_tokens": 27,
+    "total_tokens": 32
+   }
+  },
+  "method": "POST",
+  "path": "/olla/ollama/v1/chat/completions",
+  "request": {
+   "max_tokens": 5,
+   "messages": [
+    {
+     "content": "Say ok",
+     "role": "user"
+    }
+   ],
+   "model": "llama3.2:3b"
+  },
+  "status": 200,
+  "text": null
+ },
+ "POST unknown model": {
+  "headers": {
+   "Connection": "close",
+   "Content-Length": "30",
+   "Content-Type": "text/plain; charset=utf-8",
+   "Date": "Wed, 30 Sep 2026 12:21:23 GMT",
+   "Vary": "Origin",
+   "X-Content-Type-Options": "nosniff",
+   "X-Olla-Request-Id": "swift-carrying-0727",
+   "X-Ratelimit-Limit": "100",
+   "X-Ratelimit-Remaining": "91",
+   "X-Ratelimit-Reset": "1790770943"
+  },
+  "json": null,
+  "method": "POST",
+  "path": "/olla/ollama/api/generate",
+  "request": {
+   "model": "does-not-exist:1b",
+   "options": {
+    "num_predict": 5
+   },
+   "prompt": "Say ok",
+   "stream": false
+  },
+  "status": 404,
+  "text": "No ollama endpoints available\n"
+ },
+ "_log_samples": {
+  "  european": "{\"timestamp\":\"2026-09-30 08:54:53\",\"level\":\"INFO\",\"msg\":\"  european\",\"models\":11}",
+  "  xmas": "{\"timestamp\":\"2026-09-30 08:54:53\",\"level\":\"INFO\",\"msg\":\"  xmas\",\"models\":11}",
+  "Access log": "{\"timestamp\":\"2026-09-30 08:51:38\",\"level\":\"INFO\",\"msg\":\"Access log\",\"timestamp\":\"2026-09-30T08:51:38Z\",\"request_id\":\"proud-prancing-1fdb\",\"remote_addr\":\"10.0.0.101:63330\",\"method\":\"POST\",\"path\":\"/api/generate\",\"query\":\"\",\"status\":200,\"request_bytes\":1013,\"response_bytes\":757,\"duration_ms\":638,\"user_agent\":\"python-httpx/0.28.1\",\"referer\":\"\",\"content_type\":\"application/json\",\"accept\":\"*/*\"}",
+  "Finished model discovery on healthy endpoints (2)": "{\"timestamp\":\"2026-09-30 08:54:53\",\"level\":\"INFO\",\"msg\":\"Finished model discovery on healthy endpoints (2)\"}",
+  "Model routing rejected request": "{\"timestamp\":\"2026-09-30 12:21:23\",\"level\":\"WARN\",\"msg\":\"Model routing rejected request\",\"request_id\":\"swift-carrying-0727\",\"model\":\"does-not-exist:1b\",\"strategy\":\"strict\",\"reason\":\"model_not_found\",\"status\":404}",
+  "No compatible endpoints found for path, falling back to all endpoints": "{\"timestamp\":\"2026-09-30 12:21:16\",\"level\":\"WARN\",\"msg\":\"No compatible endpoints found for path, falling back to all endpoints\",\"request_id\":\"gentle-humming-8e7b\",\"path\":\"/api/version\",\"supported_by\":[\"sglang\",\"vllm\"],\"total_endpoints\":2}",
+  "Request completed": "{\"timestamp\":\"2026-09-30 08:51:38\",\"level\":\"INFO\",\"msg\":\"Request completed\",\"request_id\":\"silky-carrying-9bd7\",\"endpoint\":\"xmas\",\"duration_ms\":638,\"status\":\"completed\",\"model\":\"qwen2.5vl:7b-q4_k_m\",\"total_bytes\":757,\"input_tokens\":1046,\"output_tokens\":38,\"total_tokens\":1084,\"tokens_per_sec\":\"85.0\",\"ttft_ms\":20}",
+  "Request dispatching": "{\"timestamp\":\"2026-09-30 08:55:13\",\"level\":\"INFO\",\"msg\":\"Request dispatching\",\"request_id\":\"guanaco-trekking-9b4f\",\"endpoint\":\"xmas\",\"target\":\"http://xmas.lan:11434/api/generate\",\"model\":\"qwen2.5vl:7b-q4_k_m\"}",
+  "Request received": "{\"timestamp\":\"2026-09-30 08:55:13\",\"level\":\"INFO\",\"msg\":\"Request received\",\"request_id\":\"guanaco-trekking-9b4f\",\"client_ip\":\"10.0.0.101\",\"method\":\"POST\",\"path\":\"/olla/ollama/api/generate\",\"compatible_endpoints\":2,\"user_agent\":\"python-httpx/0.28.1\",\"model\":\"qwen2.5vl:7b-q4_k_m\",\"content_length\":79}",
+  "Request started": "{\"timestamp\":\"2026-09-30 12:21:16\",\"level\":\"INFO\",\"msg\":\"Request started\",\"request_id\":\"gentle-humming-597a\",\"method\":\"GET\",\"path\":\"/internal/health\",\"remote_addr\":\"127.0.0.1:37004\",\"user_agent\":\"Python-urllib/3.14\",\"request_bytes\":0,\"request_size_formatted\":\"0B\"}",
+  "Starting model discovery on healthy endpoints (2)": "{\"timestamp\":\"2026-09-30 08:54:53\",\"level\":\"INFO\",\"msg\":\"Starting model discovery on healthy endpoints (2)\"}"
+ }
+}
