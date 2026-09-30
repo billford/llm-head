@@ -55,14 +55,21 @@ async def one(client: httpx.AsyncClient, base: str, req: dict) -> dict:
     rec = {"i": req["i"], "model": req["model"], "stream": req["stream"]}
     try:
         async with client.stream("POST", base + "/olla/ollama/api/generate", json=body) as r:
-            last = None
-            async for line in r.aiter_lines():
-                if line.strip():
-                    last = line
+            # Record the status before touching the body: error bodies (429, 404) are plain text.
             rec["status"] = r.status_code
             rec["endpoint"] = r.headers.get("x-olla-endpoint")
             rec["placement"] = r.headers.get("x-olla-routing-reason")
             rec["queued_ms"] = int(r.headers.get("x-llm-head-queue-ms", 0))
+            last = None
+            async for line in r.aiter_lines():
+                if line.strip():
+                    last = line
+        if r.status_code != 200:
+            rec["error"] = f"HTTP {r.status_code}: {(last or '')[:80]}"
+            rec["eval_count"] = 0
+            rec["tok_s"] = rec["load_s"] = 0.0
+            rec["ms"] = int((time.monotonic() - t0) * 1000)
+            return rec
         final = json.loads(last) if last else {}
         rec["eval_count"] = final.get("eval_count", 0)
         ed = final.get("eval_duration") or 0
@@ -132,7 +139,9 @@ def main() -> int:
     p.add_argument("--requests", type=int, default=100)
     p.add_argument("--concurrency", type=int, default=4)
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--gap", type=float, default=0.0, help="seconds between request starts")
+    p.add_argument("--gap", type=float, default=0.0,
+                   help="seconds between request arrivals (open loop). Keep arrivals under the "
+                        "per-IP rate limit or the test measures the limiter, not the balancer")
     p.add_argument("--gptoss-boost", type=float, default=1.0, help="multiply gpt-oss's share of the mix")
     p.add_argument("--out", default=None)
     a = p.parse_args()
