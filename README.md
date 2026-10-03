@@ -11,25 +11,45 @@ the wrong signal. What a request actually costs depends on:
   (about 8× slower),
 - how many requests are waiting in Ollama's own queue, which the proxy can't see.
 
-llm-head keeps the queue itself. It tracks which models are loaded on each host and how
-much GPU memory is free. It sends each request to a host that already has its model
-loaded, and never places a model where it would spill onto the CPU. When a request has to
-wait too long, it gets a fast `503` with `Retry-After` instead of a 15-minute hang.
+llm-head keeps the queue itself. It tracks which models are loaded on each host, **at what
+context size**, and how much GPU memory is free. It:
 
-It is designed as a drop-in replacement for [Olla](https://github.com/thushan/olla): the
-same `/olla/*` and `/internal/*` API and the same JSON log format, so existing clients
-and dashboards keep working.
+- sends each request to a host that already has its model loaded at the context size the
+  request needs (Ollama has to reload a model to change `num_ctx`);
+- never places a model where it would spill onto the CPU;
+- detects a host that has stopped loading models even though its health check passes,
+  retries the request elsewhere, and avoids that model on that host for a while;
+- keeps chosen models warm at the context size they're actually requested at;
+- answers a request that waits too long with a fast `503` and `Retry-After` instead of a
+  15-minute hang;
+- drains a host before a reboot, so no request is cut off.
+
+It is a drop-in replacement for [Olla](https://github.com/thushan/olla): the same
+`/olla/*` and `/internal/*` API and the same JSON log format, so existing clients and
+dashboards keep working.
 
 ## Status
 
-**Phase 1 (build) is done. Not yet deployed.** Every Olla API field and log field our
-dashboard uses is covered by tests against responses captured from a live Olla v0.0.28.
-Next is Phase 2: shadow testing against real GPUs, then cutover. Design and measurements
-are in [`docs/specs/load-aware-scheduler.md`](docs/specs/load-aware-scheduler.md).
+**In production since 2026-10-03,** replacing Olla v0.0.28 in front of a two-GPU cluster
+(RTX 5060 Ti 16 GB × 2). Results on that cluster:
 
-The spec includes measurements from a real two-GPU cluster (5,973 requests). They show
-a 2:1 split between identical hosts, 594 model swaps per 1,000 requests on the busier
-host, and gpt-oss:20b slowing from 94 to 12 tokens/s when it shared a 16 GB card.
+| | Olla | llm-head |
+|---|---|---|
+| Cold model loads, same 120-request workload | 56–71 | 3–10 |
+| qwen2.5vl vision p95, same workload | 9–16 s | 0.8 s |
+| Requests stuck until a 120 s timeout | 6 of 120 in one run | 0 |
+| 3-day canary, real traffic | — | 1,682 / 1,682 OK |
+| Planned GPU-host reboot | requests fail mid-flight | drained first, 0 failures |
+
+How we got there, with measurements and the mistakes along the way:
+
+| Document | What it covers |
+|---|---|
+| [`docs/specs/load-aware-scheduler.md`](docs/specs/load-aware-scheduler.md) | Problem analysis, design, Olla parity checklist, rollout plan |
+| [`docs/reports/2026-09-30-phase2-shadow.md`](docs/reports/2026-09-30-phase2-shadow.md) | Head-to-head against Olla on real GPUs |
+| [`docs/reports/2026-09-30-xmas-ollama-wedge.md`](docs/reports/2026-09-30-xmas-ollama-wedge.md) | Incident: an Ollama host stopped loading models for 5 hours while healthy |
+| [`docs/reports/2026-10-03-canary-review.md`](docs/reports/2026-10-03-canary-review.md) | Three days of real traffic before cutover |
+| [`docs/specs/cutover-runbook.md`](docs/specs/cutover-runbook.md), [`docs/reports/2026-10-03-cutover.md`](docs/reports/2026-10-03-cutover.md) | How the switch was made and rolled back if needed |
 
 ## Quick start
 
@@ -53,6 +73,16 @@ requests than that, so waiting happens at the head, where it's visible and bound
 | `GET /internal/queue` | Waiting requests, and each host's loaded models and in-flight counts |
 | `POST /internal/hosts/{name}/drain` | Stop new work on a host, e.g. before a reboot. Localhost only |
 | `POST /internal/hosts/{name}/undrain` | Put it back in rotation |
+
+## Operating it
+
+| Tool | Purpose |
+|---|---|
+| `contrib/safe-restart.sh` | Validate the config, wait until nothing is in flight, restart, and confirm it answers |
+| `contrib/icinga/` | Icinga/Nagios plugins: alert on client-visible failures (`check_llm_balancer_errors`), and prove each GPU host can still load and serve a model (`check_ollama_models`). Includes example config |
+| `tools/shadow_compare.py` | Send identical requests to two balancers and compare what clients would see |
+| `tools/loadtest.py` | Replay a seeded, realistic workload. Pace it below your rate limit |
+| `tools/realhost_checks.py` | Scenario checks on real hosts: vision, tool calls, disconnects, drain, long context, bursts |
 
 ## Development
 
