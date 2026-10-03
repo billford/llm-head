@@ -118,6 +118,8 @@ class Head:
                 continue
             idle = [h for h in hosts if h not in warm and sum(h.inflight.values()) == 0]
             if idle:
+                # Prefer the model's home hosts, as placement does.
+                idle.sort(key=lambda h: h.name not in policy.home)
                 out.append((idle[0].name, model, ctx))
         return out
 

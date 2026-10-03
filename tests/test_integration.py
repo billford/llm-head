@@ -298,3 +298,9 @@ def test_usual_ctx_follows_recent_traffic():
     for _ in range(25):
         s.observe_request("m", 1.0, ctx=8192)
     assert s.usual_ctx("m") == 8192
+
+
+async def test_keep_warm_prefers_the_home_host():
+    over = {"models": {QWEN: {"keep_warm": 1, "num_ctx": 8192, "home": ["european"]}}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        assert head.warm_targets() == [("european", "qwen2.5vl:7b-q4_k_m", 8192)]
