@@ -1,6 +1,6 @@
 # Cutover runbook: Olla → llm-head on lampoon
 
-Status: **Ready, waiting for a go time** · prepared 2026-10-03
+Status: **Executed 2026-10-03 16:12:51 UTC**. See `docs/reports/2026-10-03-cutover.md`
 
 Expected client-visible downtime: **under 5 seconds**, the time between Olla stopping and
 llm-head listening on `:40114`. Rollback: **one command, under 10 seconds**.
