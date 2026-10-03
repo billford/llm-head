@@ -303,6 +303,11 @@ Two bugs were found and fixed while writing the tests:
 
 Next: run a 2–3 day canary with the batch client on `:40115`, then cut over.
 
+*Canary 2026-09-30 → 10-03:* 1,682/1,682 real requests succeeded. One latency
+regression (photo pairs sharing a GPU) was found and fixed. See
+`docs/reports/2026-10-03-canary-review.md`. Cutover steps are in
+`docs/specs/cutover-runbook.md`.
+
 **Phase 3: add the third host**
 1. Install Ollama with the Phase 0 settings and pull the models.
 2. Install the dashboard's SSH public key for its stats collector. Check that the
