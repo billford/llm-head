@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ ALPHA = 0.2  # EWMA weight of the newest sample
 DEFAULT_DURATION = 5.0
 LOAD_BYTES_PER_SEC = 1.5e9  # conservative NVMe-to-VRAM rate for a first estimate
 KV_OVERHEAD = 1.15  # loaded size vs. file size before we have observed it
+CTX_DECAY = 0.97  # per request: about the last ~30 requests decide a model's usual context size
 
 
 @dataclass
@@ -26,6 +27,8 @@ class ModelStats:
     duration: float = 0.0  # EWMA of request duration, seconds; 0 = no samples
     load_time: float = 0.0  # EWMA of cold-load time, seconds; 0 = no samples
     samples: int = 0
+    # Decaying count of requests per context size (JSON keys are strings).
+    ctx_weights: dict[str, float] = field(default_factory=dict)
 
 
 def _ewma(old: float, new: float) -> float:
@@ -49,13 +52,23 @@ class Stats:
             s.vram_bytes = vram_bytes
             self.dirty = True
 
-    def observe_request(self, model: str, duration: float, load_time: float = 0.0) -> None:
+    def observe_request(self, model: str, duration: float, load_time: float = 0.0,
+                        ctx: int | None = None) -> None:
         s = self.get(model)
         s.duration = _ewma(s.duration, duration)
         s.samples += 1
         if load_time > 0.5:  # anything faster was already loaded
             s.load_time = _ewma(s.load_time, load_time)
+        if ctx:
+            for k in s.ctx_weights:
+                s.ctx_weights[k] *= CTX_DECAY
+            s.ctx_weights[str(ctx)] = s.ctx_weights.get(str(ctx), 0.0) + 1.0
         self.dirty = True
+
+    def usual_ctx(self, model: str) -> int | None:
+        """The context size `model` is mostly requested at lately, or None if unknown."""
+        w = self.get(model).ctx_weights
+        return int(max(w, key=w.get)) if w else None
 
     def vram_estimate(self, model: str, file_size: int) -> int:
         s = self.get(model)

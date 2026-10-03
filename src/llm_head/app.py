@@ -98,29 +98,54 @@ class Head:
             await asyncio.sleep(60)
             self.stats.save()
 
+    def warm_targets(self) -> list[tuple[str, str, int]]:
+        """(host, model, num_ctx) loads that would bring keep_warm models up to target,
+        using only hosts with nothing in flight. At most one per model per round."""
+        if self.scheduler.waiting:
+            return []
+        out = []
+        for pattern, policy in self.cfg.models.items():
+            if policy.keep_warm == 0 or any(ch in pattern for ch in "*?["):
+                continue
+            model = normalize(pattern)
+            hosts = [h for h in self.cluster.hosts.values() if h.routable and model in h.installed]
+            if not hosts:
+                continue
+            ctx = policy.num_ctx or self.stats.usual_ctx(model) or hosts[0].cfg.default_num_ctx
+            warm = [h for h in hosts if h.is_loaded(model, ctx)
+                    or (model in h.pending_loads and h.pending_loads[model][3] == ctx)]
+            if len(warm) >= policy.keep_warm:
+                continue
+            idle = [h for h in hosts if h not in warm and sum(h.inflight.values()) == 0]
+            if idle:
+                out.append((idle[0].name, model, ctx))
+        return out
+
     async def _warm_loop(self) -> None:
-        """Keep `keep_warm` models loaded on enough hosts, using only idle capacity."""
+        """Keep `keep_warm` models loaded on enough hosts, at the context size they're used at."""
         while True:
             await asyncio.sleep(15)
-            for pattern, policy in self.cfg.models.items():
-                if policy.keep_warm == 0 or any(ch in pattern for ch in "*?["):
-                    continue
-                model = normalize(pattern)
-                hosts = [h for h in self.cluster.hosts.values() if h.routable and model in h.installed]
-                warm = [h for h in hosts if model in h.loaded or model in h.pending_loads]
-                if len(warm) >= policy.keep_warm or self.scheduler.waiting:
-                    continue
-                idle = [h for h in hosts if h not in warm and sum(h.inflight.values()) == 0]
-                if not idle:
-                    continue
-                target = idle[0]
-                self.log.info("Warming model", model=model, endpoint=target.name, keep_warm=policy.keep_warm)
-                with contextlib.suppress(httpx.HTTPError):
-                    await self.client.post(
-                        target.cfg.url + "/api/generate",
-                        json={"model": self.cluster.installed_spelling(target.name, model), "keep_alive": "30m"},
-                        timeout=120,
-                    )
+            for host, model, ctx in self.warm_targets():
+                await self.warm(host, model, ctx)
+
+    async def warm(self, host: str, model: str, ctx: int) -> None:
+        h = self.cluster.hosts[host]
+        self.log.info("Warming model", model=model, endpoint=host, num_ctx=ctx)
+        # Counted like a request so placement sees the host as busy and the load as pending.
+        self.cluster.begin(host, model, cold=True, evict=(), ctx=ctx)
+        ok = False
+        try:
+            r = await self.client.post(
+                h.cfg.url + "/api/generate",
+                json={"model": self.cluster.installed_spelling(host, model), "keep_alive": "30m",
+                      "options": {"num_ctx": ctx}},
+                timeout=120,
+            )
+            ok = r.status_code == 200
+        except httpx.HTTPError as exc:
+            self.log.warn("Warming failed", model=model, endpoint=host, error=str(exc))
+        finally:
+            self.cluster.end(host, model, ok=ok, duration_ms=0, nbytes=0)
 
     # ---- helpers -----------------------------------------------------------------------
 
@@ -358,7 +383,8 @@ async def _finish_stream(head: Head, rid: str, lease: Lease, relay, started: flo
             head.cluster.model_succeeded(lease.host, lease.model)
         if ok and not cancelled:
             head.stats.observe_request(lease.model, duration_ms / 1000,
-                                       load_time=u.load_seconds if lease.decision.cold else 0.0)
+                                       load_time=u.load_seconds if lease.decision.cold else 0.0,
+                                       ctx=lease.ctx or head.cluster.hosts[lease.host].cfg.default_num_ctx)
             head.log.info(
                 "Request completed", request_id=rid, endpoint=lease.host, duration_ms=int(duration_ms),
                 status="completed", model=lease.model, total_bytes=relay.nbytes, input_tokens=u.input_tokens,

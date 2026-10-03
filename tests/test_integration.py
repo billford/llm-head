@@ -263,3 +263,38 @@ async def test_context_reload_is_not_starved_by_steady_traffic():
         # It was served by reloading qwen at 8192 on a host where qwen was idle.
         big = [d for d in log.find("Request dispatching") if d.get("num_ctx") == 8192]
         assert big and big[-1]["placement"] == "reload_context", big
+
+
+async def test_keep_warm_uses_the_context_size_requests_actually_use():
+    """Canary review 2026-10-03: photos arrive in pairs at num_ctx 8192. Warming qwen at
+    the 4096 default left only one host usable at 8192, so both photos of a pair shared
+    one GPU (~13.5s each instead of ~9.5s on separate GPUs)."""
+    over = {"models": {QWEN: {"keep_warm": 2}}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        big = {"num_predict": 4, "num_ctx": 8192}
+        for _ in range(3):
+            assert (await c.post(GEN, json=gen(options=big))).status_code == 200
+        assert head.stats.usual_ctx("qwen2.5vl:7b-q4_k_m") == 8192
+        for host, model, ctx in head.warm_targets():
+            await head.warm(host, model, ctx)
+        await asyncio.sleep(0.2)
+        assert all(f.loaded.get(QWEN) and f.loaded[QWEN].ctx == 8192 for f in fakes)
+        assert head.warm_targets() == []
+        # A pair of 8192 requests now lands on both hosts.
+        for f in fakes:
+            f.token_seconds = 0.02
+        rs = await asyncio.gather(*(c.post(GEN, json=gen(n=20, options={"num_predict": 20, "num_ctx": 8192}))
+                                    for _ in range(2)))
+        assert {r.headers["x-olla-endpoint"] for r in rs} == {"xmas", "european"}
+
+
+def test_usual_ctx_follows_recent_traffic():
+    from llm_head.stats import Stats
+
+    s = Stats(None)
+    for _ in range(10):
+        s.observe_request("m", 1.0, ctx=4096)
+    assert s.usual_ctx("m") == 4096
+    for _ in range(25):
+        s.observe_request("m", 1.0, ctx=8192)
+    assert s.usual_ctx("m") == 8192

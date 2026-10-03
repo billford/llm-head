@@ -155,6 +155,10 @@ class HostConfig(_Strict):
 class ModelPolicy(_Strict):
     home: list[str] = []
     keep_warm: int = Field(0, ge=0)
+    # Context size keep_warm loads the model at. Default: the size it is mostly requested
+    # at, learned from traffic. Warming at the wrong size is worse than not warming,
+    # because the next real request then has to reload the model.
+    num_ctx: int | None = Field(None, ge=256)
     allow_cpu_offload: bool = False
 
 
