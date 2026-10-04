@@ -14,7 +14,10 @@ Three of the four +24 h checks pass. **Cold loads miss the target** (2.7 per 1,0
 steady state, target < 1). Every one has the same cause: qwen is warm on the wrong host,
 left there by the xmas drain during cutover. That pushes gpt-oss off european, its home,
 onto xmas, where it evicts and is evicted by a twice-daily llama3.1:8b batch. Fixing the
-layout is a one-time operational step (below). It is not a code rollback.
+layout is a one-time operational step (below). It is not a code rollback. That step was
+carried out at 16:40. It also exposed a second §7 miss: llama3.2 runs partly on the CPU
+whenever it shares a GPU with gpt-oss, and this was also happening before the move. See
+"Follow-up".
 
 ## The four +24 h checks
 
@@ -30,7 +33,7 @@ layout is a one-time operational step (below). It is not a code rollback.
 | Metric | Target | Result |
 |---|---|---|
 | gpt-oss:20b max duration | < 25 s | 16.0 s (the cold load at 16:27). Warm: 4.3–8.7 s |
-| Dispatched with CPU offload | 0 | 0. gpt-oss ran at 93–94 tok/s every time. Nothing ran below 20 tok/s |
+| Dispatched with CPU offload | 0 | **Miss** (corrected after the follow-up below). gpt-oss always ran fully on the GPU (93–94 tok/s). But whenever gpt-oss was loaded on xmas, **llama3.2 on xmas ran partly on the CPU**: 169 requests at a median of 63 tok/s, against 168 tok/s otherwise. The first version of this report only checked for runs below 20 tok/s and missed this |
 | Client or dashboard changes | 0 | 0 |
 | Request split across identical hosts | within 60 / 40 | 75 / 25 (european / xmas) overall. **50 / 50** for llama3.2, the only model served from both hosts. The overall split now reflects which host holds which model, not balancer skew. §7's wording predates model-aware placement and should be reworded |
 
@@ -129,6 +132,71 @@ Nothing moves qwen back by itself. Keep-warm sees one warm copy and is satisfied
    llama3.1:8b batch will still cost one cold load per run, about 2 a day. That's
    probably acceptable for batch work, but it means < 1 per 1,000 isn't reachable on two
    GPUs with this model mix. The third host would remove it.
+
+## Follow-up, 16:40–16:44 UTC: qwen moved back to xmas
+
+Action 1 above was carried out with nothing in flight:
+- 16:40:51: llama3.1:8b unloaded on xmas, and qwen on european.
+- 16:40:53: keep-warm warmed qwen on xmas at 8192. While qwen loaded, Ollama also
+  dropped llama3.2 from xmas.
+- 16:41:14: keep-warm warmed llama3.2 on xmas again.
+- 16:41:41: a gpt-oss test request through llm-head went to european: a cold load, as
+  expected (7.5 s to first token, then 95 tok/s, fully on the GPU).
+
+The layout now matches the config:
+
+| Host | Loaded (in GPU memory / total size) |
+|---|---|
+| xmas | qwen2.5vl at 8192 (5.9 / 5.9 GiB), llama3.2 (2.9 / 2.9 GiB) |
+| european | gpt-oss (11.9 / 11.9 GiB), **llama3.2 (2.05 / 2.86 GiB)** |
+
+### New finding: gpt-oss and llama3.2 don't both fit on one 16 GB GPU
+
+On european, Ollama put about 0.8 GiB (28%) of llama3.2 on the CPU next to gpt-oss.
+The same request, sent directly to each host:
+
+| | Total time | Generation speed |
+|---|---|---|
+| llama3.2 on european, next to gpt-oss | 870–990 ms | 68 tok/s |
+| llama3.2 on xmas, next to qwen | 490–525 ms | 168 tok/s |
+
+**This isn't new.** The 24-hour logs show the same slowdown on xmas whenever gpt-oss was
+loaded there:
+
+| Period (UTC) | Loaded next to llama3.2 on xmas | xmas llama3.2, median | european llama3.2, median |
+|---|---|---|---|
+| 10-03 16:28–22:00 | gpt-oss | **63 tok/s**, 623 ms | 168 tok/s, 358 ms |
+| 10-03 22:00–10-04 03:05 | llama3.1:8b | 168 tok/s, 350 ms | 167 tok/s, 364 ms |
+| 10-04 03:05–13:00 | gpt-oss | **63 tok/s**, 596 ms | 168 tok/s, 366 ms |
+| 10-04 13:00–16:40 | llama3.1:8b | 167 tok/s, 359 ms | 167 tok/s, 382 ms |
+
+The canary review assumed gpt-oss "can stay loaded on european next to llama3.2". It
+can't, at least not fully on the GPU.
+
+llm-head's memory model thinks the pair fits:
+- usable memory: 16,311 − 512 MB reserve, about 15.4 GiB;
+- needed: 11.9 + 2.9 = 14.7 GiB.
+
+Ollama's real overhead leaves less room than that, so llm-head can't see the spill.
+Ollama does report it: `/api/ps` shows `size_vram < size` for the spilled model.
+
+So the move traded one problem for another:
+- **Better:** gpt-oss stays warm on european for interactive requests. It no longer swaps
+  with the llama3.1:8b batch.
+- **No better:** the llama3.2 copy sharing a GPU with gpt-oss still spills. It's now on
+  european all the time instead of on xmas about two-thirds of the time.
+
+### Further actions
+
+5. **Code: make spills visible.** llm-head should read `size_vram` against `size` from
+   `/api/ps`. It should treat a partly spilled model as not warm on that host and send its
+   traffic elsewhere, and record a spill as a failed fit when estimating memory.
+6. **Until then:** the options are:
+   - accept about 0.6 s extra on llama3.2 requests that land on european;
+   - lower llama3.2 to `keep_warm: 1` with `home: [xmas]`. That doesn't fully stop it:
+     llm-head can still place llama3.2 on european when xmas's slots are busy, because it
+     believes the pair fits;
+   - raise european's `reserve_mb` so llm-head stops pairing the two (about 1.5 GB more).
 
 ## Method
 
