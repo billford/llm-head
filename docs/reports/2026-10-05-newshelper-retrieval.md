@@ -81,6 +81,42 @@ Bug 3 remained live until the 21:50 deploy.
 Every new test fails on the previous code. The fake Ollama now caps nomic-embed-text at
 2048 and handles `keep_alive: 0` on `/api/embed`, as real Ollama does.
 
+## Other clients of the cluster, checked 22:00
+
+The question was whether any other client could fail the way newshelper did. llm-head
+logged every request as a success, but newshelper's failed request was logged as a 200
+too: the client gave up at 5 s and llm-head never knew. So each client's own timeout was
+compared with its request times. The timeouts come from each project's config in
+`~/Projects`; the request times come from llm-head's logs back to 2026-10-02.
+
+| Client | Model | Requests | Typical / slowest | Client timeout | Verdict |
+|---|---|---|---|---|---|
+| photo_classifier, analysis | qwen2.5vl at 8192 | 1,048 | 0.8 s / 16 s | 1200 s, one retry | Fine |
+| photo_classifier, health probe and warmup | qwen2.5vl at 8192 | (included above) | — | 10 s probe, 120 s warmup | Fine. **0 failures** in its warmup log since 10-01, the incident window included. qwen is kept warm, so the probe doesn't wait for a cold load |
+| llama3.2 classifiers (two machines) | llama3.2:3b | 1,049 | 0.4 s / 1.6 s | 30 s (SDR classifier) | Fine |
+| newshelper daily build | llama3.1:8b | 24 | 1.8 s / 8.7 s | 120 s, 3 attempts | Fine |
+| Home-automation agent (misfit) | gpt-oss:20b | 18 | 10.7 s / 23 s | not in `~/Projects` | No failures logged. Its 21:53 request was a **19 s cold load**, because the incident had unloaded gpt-oss from european at 21:37 |
+| newshelper chat | nomic-embed-text, llama3.1:8b | — | — | 15 s retrieval (was 5 s) | Fixed |
+
+Not affected by this incident:
+
+- **agenttracker (on lampoon) has failed every anomaly-scoring call since
+  2026-07-26.** That's 10,884 failures, 446 of them today.
+  - It posts to `http://192.168.1.182:40114/api/chat`. That's misfit's own Olla
+    balancer, not this cluster, and the path is missing the `/olla/ollama` prefix, so
+    every call gets a 404.
+  - It asks for `qwen2.5:32b`, which this cluster doesn't have; misfit's balancer does
+    route it.
+  - It predates llm-head and isn't related to it. The fix is the base URL in
+    `/opt/agenttracker/.env`, which is root-owned.
+- **yard_tracker** uses misfit's balancer, with the correct prefix.
+- **horror_zine** sends its cluster calls here: `llama3.2:3b` and `llava`, both
+  installed. It checks reachability with `api/tags`, which llm-head answers itself. It
+  looks dormant.
+- **writingstyle** (nomic-embed-text, writingstyle-lora, all installed) and **AWRA**
+  (gpt-oss at 32768 context, 300 s timeout) look dormant.
+- **meme_forge** has no `.env`, so it falls back to localhost.
+
 ## What went wrong in how we worked
 
 1. **The spill-capacity rule was tested only on the spill that prompted it.** The
