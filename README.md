@@ -52,6 +52,7 @@ How we got there, with measurements and the mistakes along the way:
 | [`docs/reports/2026-09-30-xmas-ollama-wedge.md`](docs/reports/2026-09-30-xmas-ollama-wedge.md) | Incident: an Ollama host stopped loading models for 5 hours while healthy |
 | [`docs/reports/2026-10-03-canary-review.md`](docs/reports/2026-10-03-canary-review.md) | Three days of real traffic before cutover |
 | [`docs/specs/cutover-runbook.md`](docs/specs/cutover-runbook.md), [`docs/reports/2026-10-03-cutover.md`](docs/reports/2026-10-03-cutover.md) | How the switch was made and rolled back if needed |
+| [`docs/reports/2026-10-04-post-cutover-24h.md`](docs/reports/2026-10-04-post-cutover-24h.md) | First 24 hours in production, and the CPU-spill finding that led to spill detection |
 
 ## Quick start
 
@@ -68,24 +69,28 @@ On each Ollama host, set `OLLAMA_NUM_PARALLEL` and `OLLAMA_MAX_LOADED_MODELS` to
 that host's `slots_per_model` and `max_loaded_models`. The head never sends more
 requests than that, so waiting happens at the head, where it's visible and bounded.
 
-### New endpoints
+No GPU handy? [Getting started](docs/guide/getting-started.md#try-it-locally-first) shows
+how to run a two-host cluster of fake Ollama servers on a laptop.
 
-| Endpoint | Purpose |
+## Documentation
+
+| Guide | Read it when |
 |---|---|
-| `GET /internal/queue` | Waiting requests, and each host's loaded models (and any spilled onto the CPU), usable GPU memory and in-flight counts |
-| `POST /internal/hosts/{name}/drain` | Stop new work on a host, e.g. before a reboot. Localhost only |
-| `POST /internal/hosts/{name}/undrain` | Put it back in rotation |
-| `POST /internal/hosts/{name}/reset-capacity` | Forget the GPU memory learned from spills, e.g. after one caused by something else on the GPU. Localhost only |
+| [Getting started](docs/guide/getting-started.md) | Installing: preparing Ollama hosts, the config, systemd, pointing clients at it, replacing Olla |
+| [Configuration](docs/guide/configuration.md) | You need to know what an option does, or its default |
+| [How it works](docs/guide/how-it-works.md) | You want to know why a request went where it did: placement, context size, the queue, keep-warm, CPU spill detection, retries |
+| [HTTP API](docs/guide/api.md) | Writing a client or dashboard: routes, response headers, errors, `/internal/*` |
+| [Operations](docs/guide/operations.md) | Restarting, upgrading, rebooting a GPU host, monitoring, reading the logs |
+| [Troubleshooting](docs/guide/troubleshooting.md) | Something's wrong: by symptom, with the commands to check |
 
-## Operating it
+Quick reference for operators, run on the head:
 
-| Tool | Purpose |
-|---|---|
-| `contrib/safe-restart.sh` | Validate the config, wait until nothing is in flight, restart, and confirm it answers |
-| `contrib/icinga/` | Icinga/Nagios plugins: alert on client-visible failures (`check_llm_balancer_errors`), and prove each GPU host can still load and serve a model (`check_ollama_models`). Includes example config |
-| `tools/shadow_compare.py` | Send identical requests to two balancers and compare what clients would see |
-| `tools/loadtest.py` | Replay a seeded, realistic workload. Pace it below your rate limit |
-| `tools/realhost_checks.py` | Scenario checks on real hosts: vision, tool calls, disconnects, drain, long context, bursts |
+```bash
+curl -s localhost:40114/internal/queue                           # what's loaded, waiting, spilled
+curl -X POST localhost:40114/internal/hosts/<name>/drain         # before rebooting a GPU host
+curl -X POST localhost:40114/internal/hosts/<name>/undrain
+contrib/safe-restart.sh llm-head /opt/llm-head/config.yaml       # restart once idle
+```
 
 ## Development
 
