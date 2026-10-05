@@ -3,7 +3,8 @@ requests the head currently has in flight there.
 
 Three background loops per host keep it current:
   health  GET <health.path> every health.interval
-  ps      GET /api/ps every discovery.ps_interval (loaded models and their GPU memory)
+  ps      GET /api/ps every discovery.ps_interval (loaded models, their GPU memory,
+          and whether Ollama spilled part of one onto the CPU)
   tags    GET /api/tags every discovery.tags_interval, and after recovery
 """
 
@@ -45,6 +46,8 @@ class HostState:
     draining: bool = False
     installed: dict[str, InstalledModel] = field(default_factory=dict)
     loaded: dict[str, LoadedModel] = field(default_factory=dict)
+    # GPU memory Ollama actually fits here, learned from spills; None until one is seen.
+    vram_capacity: int | None = None
     # Loads and evictions the head started that /api/ps doesn't reflect yet.
     # model -> (bytes, give-up deadline, expected ready time, context size); monotonic seconds
     pending_loads: dict[str, tuple[int, float, float, int]] = field(default_factory=dict)
@@ -72,9 +75,18 @@ class HostState:
     def routable(self) -> bool:
         return self.status == "healthy" and not self.draining
 
+    @property
+    def usable_vram_bytes(self) -> int:
+        cap = self.cfg.usable_vram_bytes
+        return cap if self.vram_capacity is None else min(cap, self.vram_capacity)
+
     def is_loaded(self, model: str, ctx: int) -> bool:
         lm = self.loaded.get(model)
         return lm is not None and (lm.context_length is None or lm.context_length == ctx)
+
+    def is_warm(self, model: str, ctx: int) -> bool:
+        """Loaded at `ctx` and fully on the GPU."""
+        return self.is_loaded(model, ctx) and not self.loaded[model].spilled
 
     def quarantined(self, model: str, now: float) -> bool:
         q = self.quarantine.get(model)
@@ -97,7 +109,7 @@ class HostState:
         return HostSnapshot(
             name=self.name,
             routable=self.routable,
-            usable_vram_bytes=self.cfg.usable_vram_bytes,
+            usable_vram_bytes=self.usable_vram_bytes,
             slots_per_model=self.cfg.slots_per_model,
             max_loaded_models=self.cfg.max_loaded_models,
             installed=frozenset(self.installed),
@@ -112,7 +124,8 @@ class Cluster:
         self.cfg = cfg
         self.stats = stats
         self.log = log
-        self.hosts: dict[str, HostState] = {h.name: HostState(h) for h in cfg.hosts}
+        self.hosts: dict[str, HostState] = {h.name: HostState(h, vram_capacity=stats.host_vram.get(h.name))
+                                            for h in cfg.hosts}
         self.client = client or httpx.AsyncClient(timeout=cfg.discovery.timeout)
         self._tasks: list[asyncio.Task] = []
         # Called whenever state changes in a way that might unblock waiting requests.
@@ -208,6 +221,16 @@ class Cluster:
         self.log.warn("Endpoint drain changed", endpoint_name=host, draining=draining)
         self.on_change()
 
+    def reset_capacity(self, host: str) -> None:
+        """Forget the GPU capacity learned from spills and go back to the configured one.
+        If the host is still spilling, the next polls learn it again."""
+        h = self.hosts[host]
+        forgot = self.stats.forget_host_vram(host)
+        h.vram_capacity = None
+        self.log.warn("Endpoint GPU capacity reset", endpoint=host, forgot_bytes=forgot,
+                      usable_vram_bytes=h.usable_vram_bytes)
+        self.on_change()
+
     # ---- background loops -------------------------------------------------------------
 
     def start(self) -> None:
@@ -292,16 +315,35 @@ class Cluster:
         for m in models:
             name = normalize(m.get("name") or m.get("model") or "")
             vram = int(m.get("size_vram") or 0)
+            size = int(m.get("size") or 0)
             if not name:
                 continue
             ctx = m.get("context_length")
+            spilled = vram < size
             loaded[name] = LoadedModel(vram, last_used=h.last_used.get(name, 0.0),
-                                       context_length=int(ctx) if ctx else None)
-            if vram and vram >= int(m.get("size") or 0):
+                                       context_length=int(ctx) if ctx else None, spilled=spilled)
+            if not spilled:
                 # Only learn footprints from fully-on-GPU loads; a spilled load under-reports.
                 self.stats.observe_loaded(name, vram)
-        changed = {(k, v.context_length) for k, v in loaded.items()} != {
-            (k, v.context_length) for k, v in h.loaded.items()}
+            was = h.loaded.get(name)
+            if spilled and not (was and was.spilled):
+                self.log.warn("Model spilled onto CPU", endpoint=h.name, model=name,
+                              size_vram=vram, size=size, context_length=ctx)
+            elif was and was.spilled and not spilled:
+                self.log.info("Model fully on GPU again", endpoint=h.name, model=name)
+        # What's on the GPU right now is a measured capacity when something has spilled,
+        # and a lower bound on it otherwise. A spill counts once two polls in a row show
+        # it, so a poll that catches a load half done can't shrink the capacity for good.
+        settled = any(lm.spilled and name in h.loaded and h.loaded[name].spilled for name, lm in loaded.items())
+        if loaded and (settled or not any(lm.spilled for lm in loaded.values())):
+            on_gpu = sum(lm.vram_bytes for lm in loaded.values())
+            cap = self.stats.observe_host_vram(h.name, on_gpu, spilled=settled)
+            if cap is not None:
+                h.vram_capacity = cap
+                self.log.info("Endpoint GPU capacity learned", endpoint=h.name, usable_vram_bytes=h.usable_vram_bytes,
+                              configured_bytes=h.cfg.usable_vram_bytes)
+        changed = {(k, v.context_length, v.spilled) for k, v in loaded.items()} != {
+            (k, v.context_length, v.spilled) for k, v in h.loaded.items()}
         h.loaded = loaded
         for name, pending in list(h.pending_loads.items()):
             if h.is_loaded(name, pending[3]):

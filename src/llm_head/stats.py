@@ -1,4 +1,5 @@
 """Learned per-model costs: GPU memory footprint, typical duration and cold-load time.
+Also each host's real GPU capacity, once a spill has shown it.
 
 These feed placement decisions (ModelFacts). They start as estimates and converge on
 measurements, and are saved to disk so a restart doesn't forget them.
@@ -39,6 +40,8 @@ class Stats:
     def __init__(self, path: str | None = None):
         self.path = path
         self.models: dict[str, ModelStats] = {}
+        # host -> bytes of models Ollama actually fit on its GPU; learned from spills.
+        self.host_vram: dict[str, int] = {}
         self.dirty = False
         if path:
             self._load()
@@ -51,6 +54,28 @@ class Stats:
         if vram_bytes > s.vram_bytes:
             s.vram_bytes = vram_bytes
             self.dirty = True
+
+    def observe_host_vram(self, host: str, vram_bytes: int, *, spilled: bool) -> int | None:
+        """Record what fit on `host`'s GPU. A spill sets the capacity to what was on the
+        GPU at the time; a larger set fully on the GPU raises it again. Returns the new
+        capacity when it changed, else None."""
+        old = self.host_vram.get(host)
+        if spilled:
+            if old is not None and vram_bytes >= old:
+                return None
+        elif old is None or vram_bytes <= old:
+            return None
+        self.host_vram[host] = vram_bytes
+        self.dirty = True
+        return vram_bytes
+
+    def forget_host_vram(self, host: str) -> int | None:
+        """Drop `host`'s learned capacity, e.g. after a spill that something else on the
+        GPU caused. Returns what was forgotten."""
+        old = self.host_vram.pop(host, None)
+        if old is not None:
+            self.dirty = True
+        return old
 
     def observe_request(self, model: str, duration: float, load_time: float = 0.0,
                         ctx: int | None = None) -> None:
@@ -88,6 +113,7 @@ class Stats:
             with open(self.path) as f:
                 raw = json.load(f)
             self.models = {k: ModelStats(**v) for k, v in raw.get("models", {}).items()}
+            self.host_vram = {k: int(v) for k, v in raw.get("host_vram", {}).items()}
         except FileNotFoundError:
             pass
         except (OSError, ValueError, TypeError) as exc:
@@ -96,7 +122,7 @@ class Stats:
     def save(self) -> None:
         if not self.path or not self.dirty:
             return
-        data = {"models": {k: asdict(v) for k, v in self.models.items()}}
+        data = {"models": {k: asdict(v) for k, v in self.models.items()}, "host_vram": self.host_vram}
         d = os.path.dirname(self.path) or "."
         try:
             os.makedirs(d, exist_ok=True)

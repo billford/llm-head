@@ -16,7 +16,9 @@ context size**, and how much GPU memory is free. It:
 
 - sends each request to a host that already has its model loaded at the context size the
   request needs (Ollama has to reload a model to change `num_ctx`);
-- never places a model where it would spill onto the CPU;
+- never places a model where it would spill onto the CPU. If Ollama spills one anyway,
+  llm-head notices (`/api/ps` reports less in GPU memory than the model needs), sends
+  its requests to a full copy, and learns how much that host's GPU really holds;
 - detects a host that has stopped loading models even though its health check passes,
   retries the request elsewhere, and avoids that model on that host for a while;
 - keeps chosen models warm at the context size they're actually requested at;
@@ -70,9 +72,10 @@ requests than that, so waiting happens at the head, where it's visible and bound
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /internal/queue` | Waiting requests, and each host's loaded models and in-flight counts |
+| `GET /internal/queue` | Waiting requests, and each host's loaded models (and any spilled onto the CPU), usable GPU memory and in-flight counts |
 | `POST /internal/hosts/{name}/drain` | Stop new work on a host, e.g. before a reboot. Localhost only |
 | `POST /internal/hosts/{name}/undrain` | Put it back in rotation |
+| `POST /internal/hosts/{name}/reset-capacity` | Forget the GPU memory learned from spills, e.g. after one caused by something else on the GPU. Localhost only |
 
 ## Operating it
 

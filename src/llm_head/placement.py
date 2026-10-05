@@ -13,6 +13,11 @@ Rules, in order:
   5. Never place a model where it would spill onto the CPU, unless the policy allows
      it or the model cannot fit on any host even when that host is empty.
 
+A copy that Ollama has partly placed on the CPU (/api/ps size_vram < size) is not
+"loaded" either: it generates several times slower, so requests wait for or go to a
+full copy instead. Reloading it in place is a last resort, once it is idle, and only
+with enough room to load it fully. The exceptions are the same as in rule 5.
+
 A model loaded with a different context size than the request asks for is not "loaded"
 for that request: Ollama must reload it, and it only does that once the loaded copy has
 no requests running. So such a host is a reload option only while the model is idle
@@ -57,6 +62,8 @@ class LoadedModel:
     ready_in: float = 0.0
     # Context size the model is loaded with (/api/ps context_length); None if unknown.
     context_length: int | None = None
+    # Partly on the CPU: /api/ps reported size_vram < size.
+    spilled: bool = False
 
 
 @dataclass
@@ -73,10 +80,11 @@ class HostSnapshot:
     # Context size Ollama uses when a request doesn't set num_ctx.
     default_num_ctx: int = 4096
 
-    def serves(self, model: str, ctx: int | None) -> bool:
-        """True if `model` is loaded here with the context size the request needs."""
+    def serves(self, model: str, ctx: int | None, *, spilled_ok: bool = False) -> bool:
+        """True if `model` is loaded here with the context size the request needs, and
+        fully on the GPU unless `spilled_ok`."""
         lm = self.loaded.get(model)
-        if lm is None:
+        if lm is None or (lm.spilled and not spilled_ok):
             return False
         want = ctx or self.default_num_ctx
         return lm.context_length is None or lm.context_length == want
@@ -147,8 +155,12 @@ def choose(
         home = 0 if h.name in facts.home else 1
         return (h.total_inflight, home, (hosts.index(h) - rotation) % len(hosts))
 
-    # Rule 1: loaded (not still loading) with a free slot.
-    warm = [h for h in candidates if h.serves(model, ctx)]
+    def spilled_ok(h: HostSnapshot) -> bool:
+        # A spilled copy is acceptable only where spilling is allowed or unavoidable.
+        return facts.allow_cpu_offload or facts.vram_bytes > h.usable_vram_bytes
+
+    # Rule 1: loaded (not still loading, not spilled) with a free slot.
+    warm = [h for h in candidates if h.serves(model, ctx, spilled_ok=spilled_ok(h))]
     ready = [h for h in warm if h.free_slots(model) > 0 and h.loaded[model].ready_in <= 0]
     if ready and queued_ahead == 0:
         best = min(ready, key=rank)
@@ -181,7 +193,7 @@ def choose(
         cost, host, evict = min(cold_options, key=lambda o: (o[0], rank(_by_name(candidates, o[1]))))
         reason = "cold_load_evict" if evict else "cold_load"
         if evict and evict[0] == model:
-            reason = "reload_context"
+            reason = "reload_spilled" if _by_name(candidates, host).loaded[model].spilled else "reload_context"
         return Decision(Kind.DISPATCH, reason, host=host, evict=evict, cold=True)
 
     # Nothing fits right now without evicting a busy model.
@@ -210,11 +222,13 @@ def _cold_options(
     """Every host where `model` could be loaded now, as (cost, host, evictions)."""
     options = []
     for h in candidates:
-        if h.serves(model, ctx):
+        spilled_ok = facts.allow_cpu_offload or facts.vram_bytes > h.usable_vram_bytes
+        if h.serves(model, ctx, spilled_ok=spilled_ok):
             continue
         reload_self: tuple[str, ...] = ()
         if model in h.loaded:
-            # Loaded with another context size: Ollama reloads it only once it's idle.
+            # Loaded with another context size, or spilled: Ollama reloads it only once
+            # it's idle.
             if not h.is_idle(model):
                 continue
             h = replace(h, loaded={m: lm for m, lm in h.loaded.items() if m != model})

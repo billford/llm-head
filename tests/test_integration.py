@@ -304,3 +304,132 @@ async def test_keep_warm_prefers_the_home_host():
     over = {"models": {QWEN: {"keep_warm": 1, "num_ctx": 8192, "home": ["european"]}}}
     async with cluster(head_overrides=over) as (c, head, fakes, log):
         assert head.warm_targets() == [("european", "qwen2.5vl:7b-q4_k_m", 8192)]
+
+
+async def _spill_llama_on_european(head, fakes):
+    """Recreate european on 2026-10-04: gpt-oss and llama3.2 loaded together on a GPU that
+    really holds about 13.9 GiB of models, though the config says 15.4 GiB."""
+    xmas, european = fakes
+    await xmas._ensure_loaded("llama3.2:3b")
+    await european._ensure_loaded("gpt-oss:20b")
+    await european._ensure_loaded("llama3.2:3b")
+    assert european.loaded["llama3.2:3b"].spilled
+    eu = head.cluster.hosts["european"]
+    for _ in range(100):
+        if eu.vram_capacity and "llama3.2:3b" in head.cluster.hosts["xmas"].loaded:
+            return eu
+        await asyncio.sleep(0.02)
+    raise AssertionError("head never saw the spilled load")
+
+
+def _fakes_with_small_european():
+    from .fake_ollama import FakeOllama, GiB
+
+    return [FakeOllama(), FakeOllama(vram_bytes=int(13.93 * GiB), evict_to_fit=False)]
+
+
+async def test_spilled_copy_is_noticed_and_avoided():
+    async with cluster(fakes=_fakes_with_small_european()) as (c, head, fakes, log):
+        eu = await _spill_llama_on_european(head, fakes)
+        assert eu.loaded["llama3.2:3b"].spilled
+        (warn,) = log.find("Model spilled onto CPU")
+        assert (warn["endpoint"], warn["model"]) == ("european", "llama3.2:3b")
+        assert warn["size_vram"] < warn["size"]
+        # What fit on the GPU becomes european's capacity.
+        assert eu.vram_capacity == sum(x.on_gpu for x in fakes[1].loaded.values())
+        assert eu.usable_vram_bytes < eu.cfg.usable_vram_bytes
+        assert log.find("Endpoint GPU capacity learned")
+        q = (await c.get("/internal/queue")).json()["hosts"]
+        assert q["european"]["spilled"] == ["llama3.2:3b"] and q["xmas"]["spilled"] == []
+        assert q["european"]["vram_usable_mb"] < q["xmas"]["vram_usable_mb"]
+        # Every request goes to xmas's full copy, though european is just as idle.
+        rs = [await c.post(GEN, json=gen(model="llama3.2:3b")) for _ in range(6)]
+        assert {r.headers["x-olla-endpoint"] for r in rs} == {"xmas"}
+        assert fakes[1].requests == 0
+
+
+async def test_keep_warm_does_not_warm_where_the_model_would_spill():
+    over = {"models": {"llama3.2:3b": {"keep_warm": 2}}}
+    async with cluster(head_overrides=over, fakes=_fakes_with_small_european()) as (c, head, fakes, log):
+        eu = await _spill_llama_on_european(head, fakes)
+        # The spilled copy doesn't count as warm, but rewarming it in place can't help.
+        assert head.warm_targets() == []
+        # Once it expires, the learned capacity still says it won't fit beside gpt-oss.
+        del fakes[1].loaded["llama3.2:3b"]
+        for _ in range(100):
+            if "llama3.2:3b" not in eu.loaded:
+                break
+            await asyncio.sleep(0.02)
+        assert head.warm_targets() == []
+        # With gpt-oss gone, there's room again.
+        del fakes[1].loaded["gpt-oss:20b"]
+        for _ in range(100):
+            if not eu.loaded:
+                break
+            await asyncio.sleep(0.02)
+        assert head.warm_targets() == [("european", "llama3.2:3b", 4096)]
+
+
+async def test_learned_capacity_can_be_reset():
+    async with cluster(fakes=_fakes_with_small_european()) as (c, head, fakes, log):
+        eu = await _spill_llama_on_european(head, fakes)
+        assert eu.usable_vram_bytes < eu.cfg.usable_vram_bytes
+        # Clear the spill first, or the next polls would learn the capacity again.
+        del fakes[1].loaded["llama3.2:3b"]
+        for _ in range(100):
+            if "llama3.2:3b" not in eu.loaded:
+                break
+            await asyncio.sleep(0.02)
+        r = await c.post("/internal/hosts/european/reset-capacity")
+        assert r.status_code == 200
+        assert r.json()["vram_usable_mb"] == eu.cfg.usable_vram_bytes // (1024 * 1024)
+        assert eu.vram_capacity is None and "european" not in head.stats.host_vram
+        assert log.find("Endpoint GPU capacity reset")
+        assert (await c.post("/internal/hosts/nowhere/reset-capacity")).status_code == 404
+
+
+def test_host_capacity_learning_and_persistence(tmp_path):
+    from llm_head.stats import Stats
+
+    path = str(tmp_path / "stats.json")
+    s = Stats(path)
+    assert s.observe_host_vram("eu", 15 * 2**30, spilled=False) is None  # no spill, nothing learned
+    assert s.observe_host_vram("eu", 14 * 2**30, spilled=True) == 14 * 2**30
+    assert s.observe_host_vram("eu", 14 * 2**30 + 1, spilled=True) is None  # never raised by a spill
+    assert s.observe_host_vram("eu", 13 * 2**30, spilled=False) is None
+    assert s.observe_host_vram("eu", 14.5 * 2**30, spilled=False) == 14.5 * 2**30  # a bigger full load
+    s.save()
+    assert Stats(path).host_vram == {"eu": 14.5 * 2**30}
+
+
+async def test_capacity_is_learned_only_from_a_spill_seen_twice():
+    """A poll can catch Ollama mid-load; one odd reading mustn't shrink a host for good."""
+    import httpx
+
+    from llm_head.cluster import Cluster
+    from llm_head.config import Config
+    from llm_head.stats import Stats
+
+    from .conftest import MemLog
+
+    GiB = 1024**3
+    spilled = {"models": [{"name": "gpt-oss:20b", "size": 12 * GiB, "size_vram": 12 * GiB},
+                          {"name": "llama3.2:3b", "size": 3 * GiB, "size_vram": 2 * GiB}]}
+    full = {"models": [{"name": "gpt-oss:20b", "size": 12 * GiB, "size_vram": 12 * GiB}]}
+    replies = [spilled, full, spilled, spilled]
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=replies.pop(0))))
+    cfg = Config.model_validate({"hosts": [{"name": "eu", "url": "http://eu", "vram_mb": 16311}],
+                                 "logging": {"file": None}, "stats_file": None})
+    log = MemLog()
+    c = Cluster(cfg, Stats(None), log, client=client)
+    h = c.hosts["eu"]
+    await c.refresh_ps(h)
+    assert h.loaded["llama3.2:3b"].spilled and h.vram_capacity is None
+    assert len(log.find("Model spilled onto CPU")) == 1
+    await c.refresh_ps(h)
+    assert h.vram_capacity is None and log.find("Model fully on GPU again") == []
+    await c.refresh_ps(h)
+    assert h.vram_capacity is None
+    await c.refresh_ps(h)
+    assert h.vram_capacity == 14 * GiB and h.usable_vram_bytes == 14 * GiB
+    assert len(log.find("Model spilled onto CPU")) == 2

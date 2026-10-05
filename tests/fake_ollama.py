@@ -37,6 +37,7 @@ class Loaded:
     last_used: float = 0.0
     spilled: bool = False
     ctx: int = 4096
+    on_gpu: int = 0  # bytes on the GPU; less than size when spilled
 
 
 @dataclass
@@ -48,6 +49,9 @@ class FakeOllama:
     load_seconds: float = 0.05
     token_seconds: float = 0.002
     spill_factor: float = 8.0
+    # False: like Ollama 0.32 on european on 2026-10-04, keep idle models loaded and put
+    # part of the new one on the CPU instead of evicting to make room.
+    evict_to_fit: bool = True
     healthy: bool = True
     health_delay: float = 0.0
     fail_next: int = 0  # respond 503 to this many inference requests
@@ -118,13 +122,15 @@ class FakeOllama:
             size = self.models[model]
             used = lambda: sum(x.size for x in self.loaded.values())  # noqa: E731
             idle = sorted((m for m, x in self.loaded.items() if x.inflight == 0), key=lambda m: self.loaded[m].last_used)
-            while idle and (used() + size > self.vram_bytes or len(self.loaded) >= self.max_loaded):
+            while idle and ((self.evict_to_fit and used() + size > self.vram_bytes)
+                            or len(self.loaded) >= self.max_loaded):
                 del self.loaded[idle.pop(0)]
                 self.evictions += 1
-            spilled = used() + size > self.vram_bytes
+            on_gpu = sum(x.on_gpu for x in self.loaded.values())
+            spilled = on_gpu + size > self.vram_bytes
             if spilled:
                 self.spills += 1
-            lm = Loaded(size=size, spilled=spilled, ctx=ctx)
+            lm = Loaded(size=size, spilled=spilled, ctx=ctx, on_gpu=min(size, max(0, self.vram_bytes - on_gpu)))
             self.loaded[model] = lm
             self.loads += 1
         await asyncio.sleep(self.load_seconds)
@@ -186,7 +192,7 @@ class FakeOllama:
         return JSONResponse(
             {
                 "models": [
-                    {"name": m, "model": m, "size": x.size, "size_vram": x.size if not x.spilled else x.size // 2,
+                    {"name": m, "model": m, "size": x.size, "size_vram": x.on_gpu,
                      "context_length": x.ctx}
                     for m, x in self.loaded.items()
                 ]

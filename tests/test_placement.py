@@ -217,3 +217,55 @@ def test_context_reload_waits_when_every_copy_is_busy():
         h.loaded[QWEN].context_length = 4096
     d = choose(QWEN, hosts, facts(QWEN), ctx=8192)
     assert d.kind == Kind.WAIT
+
+
+# european on 2026-10-04: Ollama fit only 13.9 GiB of models on the GPU, so llama3.2
+# loaded next to gpt-oss with 2.05 of its 2.86 GiB on the GPU and ran at 68 tok/s.
+LEARNED = int(13.93 * GiB)
+
+
+def spilled_llama_beside_gptoss(**kw) -> HostSnapshot:
+    h = host("european", [GPTOSS, LLAMA], usable=LEARNED, **kw)
+    h.loaded[LLAMA] = LoadedModel(int(2.05 * GiB), last_used=1, spilled=True)
+    return h
+
+
+def test_spilled_copy_is_not_warm_when_a_full_copy_has_a_slot():
+    """european is idle and xmas is busier, but only xmas has llama fully on the GPU."""
+    hosts = [host("xmas", [QWEN, LLAMA], inflight={LLAMA: 1}), spilled_llama_beside_gptoss()]
+    for r in range(2):
+        d = choose(LLAMA, hosts, facts(LLAMA, typical_duration=0.4), rotation=r)
+        assert (d.kind, d.host, d.cold) == (Kind.DISPATCH, "xmas", False)
+
+
+def test_waits_for_full_copy_rather_than_evicting_to_reload_a_spilled_one():
+    hosts = [host("xmas", [QWEN, LLAMA], inflight={LLAMA: 2}), spilled_llama_beside_gptoss()]
+    warm = {GPTOSS: facts(GPTOSS, load_time=6.0)}
+    d = choose(LLAMA, hosts, facts(LLAMA, typical_duration=0.4, load_time=1.5), warm_facts=warm)
+    assert (d.kind, d.reason) == (Kind.WAIT, "slots_busy")
+
+
+def test_only_copy_spilled_is_reloaded_with_room_to_fit_fully():
+    """With no full copy anywhere, reload it in place, evicting enough to fit on the GPU."""
+    hosts = [host("xmas", [], routable=False), spilled_llama_beside_gptoss()]
+    d = choose(LLAMA, hosts, facts(LLAMA))
+    assert (d.kind, d.host, d.reason, d.cold) == (Kind.DISPATCH, "european", "reload_spilled", True)
+    assert d.evict == (LLAMA, GPTOSS)
+
+
+def test_spilled_copy_is_used_when_offload_is_allowed():
+    hosts = [host("xmas", [QWEN, LLAMA], inflight={LLAMA: 1}), spilled_llama_beside_gptoss()]
+    d = choose(LLAMA, hosts, facts(LLAMA, allow_cpu_offload=True))
+    assert (d.host, d.cold) == ("european", False)
+
+
+def test_learned_capacity_stops_pairing_gptoss_with_llama():
+    """The configured 15.4 GiB says gpt-oss + llama3.2 fit; the learned 13.9 GiB says not."""
+    busy_xmas = host("xmas", [QWEN, LLAMA], inflight={LLAMA: 1})
+    llama = facts(LLAMA, typical_duration=2.0, load_time=1.5)  # long queue: a 2nd copy pays off
+    warm = {GPTOSS: facts(GPTOSS, load_time=6.0)}
+    d = choose(LLAMA, [busy_xmas, host("european", [GPTOSS])], llama, queued_ahead=4, warm_facts=warm)
+    assert (d.host, d.evict) == ("european", ())  # what the configured figure allowed
+    d = choose(LLAMA, [busy_xmas, host("european", [GPTOSS], usable=LEARNED)], llama, queued_ahead=4,
+               warm_facts=warm)
+    assert (d.host, d.cold) == ("xmas", False)  # evicting gpt-oss costs more than waiting

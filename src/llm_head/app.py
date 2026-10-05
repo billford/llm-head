@@ -27,6 +27,7 @@ from .config import Config
 from .middleware import ClientIP, CorsMiddleware, LimitsMiddleware
 from .names import normalize
 from .obslog import EventLog
+from .placement import HostSnapshot
 from .relay import UpstreamUnavailable, forward_headers, open_upstream, response_headers
 from .scheduler import Lease, Rejected, Scheduler
 from .stats import Stats
@@ -100,9 +101,14 @@ class Head:
 
     def warm_targets(self) -> list[tuple[str, str, int]]:
         """(host, model, num_ctx) loads that would bring keep_warm models up to target,
-        using only hosts with nothing in flight. At most one per model per round."""
+        using only hosts with nothing in flight. At most one per model per round.
+
+        Warming never evicts: it only uses a host where the model fits fully on the GPU
+        beside what's already there. Otherwise Ollama would pick what to unload, or spill
+        the model onto the CPU, and keep-warm would undo the placement policy."""
         if self.scheduler.waiting:
             return []
+        now = time.monotonic()
         out = []
         for pattern, policy in self.cfg.models.items():
             if policy.keep_warm == 0 or any(ch in pattern for ch in "*?["):
@@ -112,11 +118,14 @@ class Head:
             if not hosts:
                 continue
             ctx = policy.num_ctx or self.stats.usual_ctx(model) or hosts[0].cfg.default_num_ctx
-            warm = [h for h in hosts if h.is_loaded(model, ctx)
+            warm = [h for h in hosts if h.is_warm(model, ctx)
                     or (model in h.pending_loads and h.pending_loads[model][3] == ctx)]
             if len(warm) >= policy.keep_warm:
                 continue
-            idle = [h for h in hosts if h not in warm and sum(h.inflight.values()) == 0]
+            need = self.cluster.facts(model).vram_bytes
+            idle = [h for h in hosts if h not in warm and sum(h.inflight.values()) == 0
+                    and not (model in h.loaded and h.loaded[model].spilled)
+                    and _fits_beside_loaded(h.snapshot(now), model, need)]
             if idle:
                 # Prefer the model's home hosts, as placement does.
                 idle.sort(key=lambda h: h.name not in policy.home)
@@ -404,6 +413,13 @@ async def _finish_stream(head: Head, rid: str, lease: Lease, relay, started: flo
             )
 
 
+def _fits_beside_loaded(snap: HostSnapshot, model: str, need: int) -> bool:
+    """True if `model` fits fully on the GPU next to the other models loaded there."""
+    others = {m: lm for m, lm in snap.loaded.items() if m != model}
+    used = sum(lm.vram_bytes for lm in others.values())
+    return len(others) < snap.max_loaded_models and used + need <= snap.usable_vram_bytes
+
+
 def pick_direct(head: Head, model: str | None, *, prefer_loaded: bool) -> str | None:
     """Host for a request that doesn't need a slot: least busy, having the model if named."""
     hosts = [h for h in head.cluster.hosts.values() if h.routable]
@@ -531,7 +547,8 @@ def _endpoint_status(head: Head, h) -> dict:
         # llm-head additions
         "loaded_models": sorted(h.loaded),
         "vram_used": fmt.size(sum(m.vram_bytes for m in h.loaded.values())),
-        "vram_usable": fmt.size(h.cfg.usable_vram_bytes),
+        "vram_usable": fmt.size(h.usable_vram_bytes),
+        "spilled_models": sorted(m for m, lm in h.loaded.items() if lm.spilled),
         "inflight": {m: n for m, n in h.inflight.items() if n},
     }
 
@@ -649,6 +666,8 @@ async def internal_queue(request: Request) -> Response:
         "hosts": {
             h.name: {
                 "status": h.status, "draining": h.draining, "loaded": sorted(h.loaded),
+                "spilled": sorted(m for m, lm in h.loaded.items() if lm.spilled),
+                "vram_usable_mb": h.usable_vram_bytes // (1024 * 1024),
                 "pending_loads": sorted(h.pending_loads), "inflight": {m: n for m, n in h.inflight.items() if n},
             }
             for h in head.cluster.hosts.values()
@@ -667,6 +686,17 @@ async def internal_drain(request: Request) -> Response:
     head.cluster.set_draining(name, draining)
     h = head.cluster.hosts[name]
     return JSONResponse({"host": name, "draining": draining, "inflight": sum(h.inflight.values())})
+
+
+async def internal_reset_capacity(request: Request) -> Response:
+    head: Head = request.app.state.head
+    if not _is_loopback(request.state.client_ip):
+        return JSONResponse({"error": "reset-capacity is only allowed from localhost"}, status_code=403)
+    name = request.path_params["name"]
+    if name not in head.cluster.hosts:
+        return JSONResponse({"error": f"unknown host {name}"}, status_code=404)
+    head.cluster.reset_capacity(name)
+    return JSONResponse({"host": name, "vram_usable_mb": head.cluster.hosts[name].usable_vram_bytes // (1024 * 1024)})
 
 
 async def version(request: Request) -> Response:
@@ -736,6 +766,7 @@ def build_app(cfg: Config, *, head: Head | None = None) -> Starlette:
             Route("/internal/queue", internal_queue),
             Route("/internal/hosts/{name}/drain", internal_drain, methods=["POST"]),
             Route("/internal/hosts/{name}/undrain", internal_drain, methods=["POST"]),
+            Route("/internal/hosts/{name}/reset-capacity", internal_reset_capacity, methods=["POST"]),
             Route("/version", version),
             Route("/olla/models", olla_models),
             Route("/olla/ollama/{path:path}", proxy, methods=methods),
