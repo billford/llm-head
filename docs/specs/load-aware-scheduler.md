@@ -325,13 +325,19 @@ regression (photo pairs sharing a GPU) was found and fixed. See
 
 | Metric | Baseline | Target |
 |---|---|---|
-| Request split across identical hosts | 68 / 32 | within 60 / 40 |
+| Request split across identical hosts, **per model, among the hosts that hold it warm** | 68 / 32 (all models together) | within 60 / 40 |
 | Cold loads (first token after more than 3 s) per 1,000 requests | 10.8 (2.0 after Phase 0) | < 1 |
 | qwen2.5vl p95 | 5.5 s (xmas) | < 1 s on every host |
 | gpt-oss:20b max duration | 75.6 s | < 25 s |
 | Requests dispatched with CPU offload | many (12 tok/s runs) | 0 unless `allow_cpu_offload` |
 | Longest stall before failing | 15 min | 120 s (queue) / 60 s (no tokens) |
 | Client or dashboard code changes needed | — | 0 |
+
+*Split criterion reworded 2026-10-05.* It originally measured all requests together.
+That was right for Olla, which ignored models, so any imbalance was skew. Under
+model-aware placement the overall split mostly shows which host holds which model:
+75 / 25 in the first 24 hours, with llama3.2, the only model on both hosts, at 50 / 50.
+See `docs/reports/2026-10-04-post-cutover-24h.md`.
 
 ## 8. Decisions and open questions
 

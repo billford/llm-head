@@ -124,9 +124,11 @@ Nothing moves qwen back by itself. Keep-warm sees one warm copy and is satisfied
    Expect one cold load for qwen and one for gpt-oss.
 2. **Code follow-up:** keep-warm should move a model back to its home host when the home
    has room and the model is idle. Otherwise every drain or reboot can leave this layout
-   behind again.
+   behind again. **Code done 2026-10-05, not yet deployed:** keep-warm now warms a copy
+   at home when home has room, then unloads the stray copy once it has been idle for 5
+   minutes ("Rehoming model" in the log).
 3. **Spec §7:** reword the split criterion as "per model, across hosts that hold it". The
-   current 75 / 25 is placement, not skew.
+   current 75 / 25 is placement, not skew. **Done 2026-10-05.**
 4. **Re-measure cold loads at the 7-day mark.** With 3 events in 1,129 requests, one
    cold load is worth about 0.9 per 1,000, so the < 1 target needs a longer window. The
    llama3.1:8b batch will still cost one cold load per run, about 2 a day. That's
