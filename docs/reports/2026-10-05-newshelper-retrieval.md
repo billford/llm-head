@@ -1,7 +1,7 @@
 # Incident: newshelper's chatbot couldn't reach its news index
 
-2026-10-05 · blameless write-up · status: **mitigated** 21:47 UTC; code fix committed,
-not yet deployed
+2026-10-05 · blameless write-up · status: **resolved** 21:52 UTC (fix `b748c6e`
+deployed, newshelper timeout raised)
 
 ## Summary
 
@@ -50,6 +50,9 @@ of 2026-09-30 (`4aec078`):
 | 21:38 | Reported |
 | 21:47 | Mitigated (below). Test chat through the proxy: HTTP 200 with cited news in 12.3 s |
 | 21:48 | Bug 3 confirmed: consecutive embeddings show `reload_context`, then `loading` |
+| 21:50 | `77fc938` deployed (fixes plus the keep-warm rehoming change `0c0f9e8`). Stats backed up to `stats.json.pre-77fc938` |
+| 21:50:55 | `Model context capped`: nomic-embed-text, requested 4096, loaded at 2048. The next two embeddings are `loaded`, with no reload |
+| 21:52 | newshelper `RETRIEVAL_TIMEOUT_MS` raised to 15000 in the chat proxy's `prod.env` on lampoon (backup `prod.env.bak-20261005`), proxy restarted. Test chat: HTTP 200 with cited news in 3.7 s |
 
 ## Mitigation (21:47)
 
@@ -65,10 +68,9 @@ Resetting to the configured figure wouldn't have been enough. llm-head would aga
 pair gpt-oss with llama3.2, Ollama would spill, and the same lingering-copy bug would
 recur the next time gpt-oss was unloaded.
 
-Bug 3 remains live until the fix is deployed. Each nomic embedding after a few minutes
-idle reloads, taking about 1–4 s. That's under the proxy's 5 s, but without much margin.
+Bug 3 remained live until the 21:50 deploy.
 
-## Fixes (committed, not yet deployed)
+## Fixes (deployed 21:50)
 
 | Bug | Fix | Test |
 |---|---|---|
@@ -94,7 +96,7 @@ Every new test fails on the previous code. The fake Ollama now caps nomic-embed-
 
 | # | Action | Status |
 |---|---|---|
-| 1 | Deploy the fixes, then check `/internal/queue` and an embed pair (`loaded` on the second) | Waiting for approval |
-| 2 | newshelper: raise `RETRIEVAL_TIMEOUT_MS` from 5000 to about 15000, so one cold embedding load can't empty the answer | Proposed, newshelper repo |
+| 1 | Deploy the fixes, then check `/internal/queue` and an embed pair (`loaded` on the second) | **Done** 21:50. european 14,267 MB, nothing spilled, `max_ctx` saved |
+| 2 | newshelper: raise `RETRIEVAL_TIMEOUT_MS` from 5000 to about 15000, so one cold embedding load can't empty the answer | **Done** 21:52 in lampoon's `prod.env`. The code default in `rag-server.js` is still 5000 |
 | 3 | Consider `keep_warm: 1` for nomic-embed-text, so retrieval is always warm | Open. It takes one of the two model slots on a host |
-| 4 | Delete `stats.json.pre-capfix` and `stats.json.pre-b4a9cad` on lampoon once the fix is deployed and stable | Open |
+| 4 | Delete `stats.json.pre-b4a9cad`, `.pre-capfix` and `.pre-77fc938` on lampoon once stable | Open |
