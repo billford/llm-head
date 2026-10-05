@@ -191,12 +191,51 @@ So the move traded one problem for another:
 5. **Code: make spills visible.** llm-head should read `size_vram` against `size` from
    `/api/ps`. It should treat a partly spilled model as not warm on that host and send its
    traffic elsewhere, and record a spill as a failed fit when estimating memory.
-6. **Until then:** the options are:
+   **Done:** `b4a9cad`, deployed 2026-10-05. See the next section.
+6. **Until then** (no longer needed once 5 was deployed), the options were:
    - accept about 0.6 s extra on llama3.2 requests that land on european;
    - lower llama3.2 to `keep_warm: 1` with `home: [xmas]`. That doesn't fully stop it:
      llm-head can still place llama3.2 on european when xmas's slots are busy, because it
      believes the pair fits;
    - raise european's `reserve_mb` so llm-head stops pairing the two (about 1.5 GB more).
+
+## Follow-up, 2026-10-05 13:03–13:06 UTC: spill detection deployed
+
+`b4a9cad` was deployed on lampoon at 13:03:05:
+- `git pull`, `pip install` into `/opt/llm-head/venv`, then `safe-restart.sh`. The
+  restart happened at once because nothing was in flight.
+- The stats file was backed up first, to `data/stats.json.pre-b4a9cad`.
+
+At the restart nothing was spilled. The 13:00 llama3.1:8b batch had pushed gpt-oss off
+european, leaving llama3.1:8b and llama3.2 there, both fully on the GPU. llm-head's view
+matched `/api/ps` on both hosts. So one gpt-oss test request was sent through llm-head,
+as on 10-04:
+
+| Time (UTC) | Event |
+|---|---|
+| 13:04:26 | gpt-oss sent to european, `cold_load_evict`, which unloads llama3.1:8b. 4.3 s load, 94.8 tok/s, fully on the GPU |
+| 13:04:37 | `WARN Model spilled onto CPU`: llama3.2 on european, `size_vram` 2.05 GiB of `size` 2.86 GiB. This is the same spill as on 10-04 |
+| 13:04:38 | `Endpoint GPU capacity learned`: european can use 14,267 MB, down from the configured 15,799 MB. It was written to `stats.json` by 13:05:05 |
+| 13:04:58 | 6 llama3.2 test requests: **all went to xmas**, each `loaded`. European's spilled copy was not used |
+| 13:05–13:06 | keep-warm did nothing on european. The spilled copy doesn't count as warm, and there isn't room to reload it fully |
+
+`GET /internal/queue` now shows european with `"spilled": ["llama3.2:3b"]` and
+`"vram_usable_mb": 14267`. xmas shows 15,799 MB, since xmas has never spilled.
+
+**What this means for the layout.**
+- With 14,267 MB to work with, llm-head won't load gpt-oss (11.9 GiB) and llama3.2
+  (2.9 GiB) side by side on one host. So llama3.2 requests now go to xmas while gpt-oss
+  is on european, instead of running at 68 tok/s on european.
+- keep-warm will keep only one full copy of llama3.2 (on xmas) while gpt-oss is loaded,
+  not the configured two. When both of xmas's llama3.2 slots are busy, a request either
+  waits for one or, if gpt-oss is idle, evicts it to load a full copy on european. Which
+  one happens depends on placement cost. Either way it never uses the slow copy. The next
+  review should check how often this happens.
+
+**If the learned capacity is ever wrong.** Something else using the GPU could cause a
+spill that understates a host's capacity. Nothing raises it again on its own, because
+llm-head no longer loads more than the learned figure. To reset it, run
+`curl -X POST localhost:40114/internal/hosts/<name>/reset-capacity` on lampoon.
 
 ## Method
 
