@@ -281,6 +281,9 @@ async def test_keep_warm_uses_the_context_size_requests_actually_use():
         await asyncio.sleep(0.2)
         assert all(f.loaded.get(QWEN) and f.loaded[QWEN].ctx == 8192 for f in fakes)
         assert head.warm_targets() == []
+        # Copies at 4096 that were still loaded while 8192 ones replaced them are not
+        # mistaken for qwen's maximum context.
+        assert head.stats.max_ctx == {}
         # A pair of 8192 requests now lands on both hosts.
         for f in fakes:
             f.token_seconds = 0.02
@@ -461,6 +464,67 @@ async def test_learned_capacity_can_be_reset():
         assert eu.vram_capacity is None and "european" not in head.stats.host_vram
         assert log.find("Endpoint GPU capacity reset")
         assert (await c.post("/internal/hosts/nowhere/reset-capacity")).status_code == 404
+
+
+async def test_a_lingering_spill_does_not_shrink_capacity():
+    """2026-10-05 21:37: gpt-oss was unloaded from european, the spilled llama3.2 copy
+    stayed partly on the CPU (Ollama doesn't move it back), and the head took its 2.05 GiB
+    as european's whole capacity. newshelper's retrieval then timed out."""
+    async with cluster(fakes=_fakes_with_small_european()) as (c, head, fakes, log):
+        eu = await _spill_llama_on_european(head, fakes)
+        learned = eu.vram_capacity
+        del fakes[1].loaded["gpt-oss:20b"]
+        await _wait_loaded(head, "european", "gpt-oss:20b", present=False)
+        await asyncio.sleep(0.3)  # several more polls of the lingering spill
+        assert eu.loaded["llama3.2:3b"].spilled
+        assert eu.vram_capacity == learned and head.stats.host_vram["european"] == learned
+        assert len(log.find("Endpoint GPU capacity learned")) == 1
+
+
+async def test_a_spill_implying_a_tiny_gpu_is_not_learned():
+    """Under half the configured memory is more likely another GPU user than a limit."""
+    import httpx
+
+    from llm_head.cluster import Cluster
+    from llm_head.config import Config
+    from llm_head.stats import Stats
+
+    from .conftest import MemLog
+
+    GiB = 1024**3
+    tiny = {"models": [{"name": "llama3.2:3b", "size": 3 * GiB, "size_vram": 2 * GiB}]}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=tiny)))
+    cfg = Config.model_validate({"hosts": [{"name": "eu", "url": "http://eu", "vram_mb": 16311}],
+                                 "logging": {"file": None}, "stats_file": None})
+    log = MemLog()
+    c = Cluster(cfg, Stats(None), log, client=client)
+    h = c.hosts["eu"]
+    for _ in range(3):
+        await c.refresh_ps(h)
+    assert h.vram_capacity is None and h.usable_vram_bytes == h.cfg.usable_vram_bytes
+    assert len(log.find("Endpoint GPU capacity not learned")) == 1
+
+
+async def test_a_model_capped_below_the_default_context_is_not_reloaded_every_time():
+    """nomic-embed-text tops out at 2048 context. Ollama loads it at 2048 whatever is
+    asked, so expecting the 4096 default made every embed request a forced reload."""
+    async with cluster() as (c, head, fakes, log):
+        body = {"model": "nomic-embed-text", "input": "x"}
+        first = await c.post("/olla/ollama/api/embed", json=body)
+        assert first.status_code == 200 and first.headers["x-llm-head-cold-load"] == "true"
+        for _ in range(100):
+            if head.stats.max_ctx.get("nomic-embed-text:latest") == 2048:
+                break
+            await asyncio.sleep(0.02)
+        (capped,) = log.find("Model context capped")
+        assert (capped["requested"], capped["context_length"]) == (4096, 2048)
+        host = first.headers["x-olla-endpoint"]
+        await asyncio.sleep(0.2)
+        loads = sum(f.loads for f in fakes)
+        for _ in range(3):
+            r = await c.post("/olla/ollama/api/embed", json=body)
+            assert r.headers["x-olla-endpoint"] == host and r.headers["x-olla-routing-reason"] == "loaded"
+        assert sum(f.loads for f in fakes) == loads and sum(f.evictions for f in fakes) == 0
 
 
 def test_host_capacity_learning_and_persistence(tmp_path):

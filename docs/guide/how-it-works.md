@@ -105,7 +105,11 @@ So llm-head treats "loaded at 4096" and "loaded at 8192" as different things:
 
 - a request for 8192 doesn't count a copy loaded at 4096 as warm;
 - it reloads that copy only while it's idle, and otherwise uses or loads another one;
-- a request that doesn't set `num_ctx` gets the host's `default_num_ctx`.
+- a request that doesn't set `num_ctx` gets the host's `default_num_ctx`;
+- some models have a smaller maximum context than that, such as `nomic-embed-text`
+  at 2048. Ollama loads them at their maximum whatever is asked. llm-head learns this
+  the first time it happens (`Model context capped` in the log, saved in the stats file)
+  and treats a copy at the maximum as matching any request for more.
 
 The most common cause of avoidable cold loads is a client that sends `num_ctx` on some
 requests but not others, such as a warmup or health probe without it. Have such clients
@@ -169,10 +173,17 @@ can still spill. llm-head handles this as follows:
 2. **Avoid.** A spilled copy doesn't count as loaded. Requests go to a full copy
    elsewhere, or wait for one, or load one. A spilled copy is used only if the policy
    allows CPU offload, or if the model is too big to fit fully anywhere.
-3. **Learn.** Once the spill shows on two polls in a row, llm-head takes what was on the
-   GPU at that moment as the host's real capacity. It logs `Endpoint GPU capacity
-   learned` and uses the lower figure for placement from then on. Two polls are needed
-   so a poll that catches a load half-finished doesn't count.
+3. **Learn.** When a spill first appears, and the next poll shows the same models still
+   loaded, llm-head takes what's on the GPU as the host's real capacity. It logs
+   `Endpoint GPU capacity learned` and uses the lower figure for placement from then on.
+   - The second poll is needed so a poll that catches a load half-finished doesn't
+     count.
+   - Only a fresh spill counts. Ollama doesn't move a spilled copy back onto the GPU
+     when its neighbours unload, so a copy left over from an earlier spill says nothing
+     about capacity.
+   - A spill that would mean less than half the configured memory isn't learned. That
+     points to something else using the GPU, so llm-head logs `Endpoint GPU capacity not
+     learned` (WARN) instead.
 4. **Remember.** The learned capacity is saved in `stats_file`, so it survives
    restarts. It's raised only if a larger set of models is later seen fully on the GPU.
    In practice that doesn't happen, because placement no longer loads more than the
@@ -229,6 +240,7 @@ duplicate or contradictory answer.
 | Load time per model | `load_duration` in responses to cold loads | Cost of a cold load vs. waiting; the load watchdog's deadline |
 | Request duration per model | Measured | Expected wait for a slot; `Retry-After` |
 | Usual context size per model | Recent requests' `num_ctx` (the last ~30 count most) | What size keep-warm loads at |
+| Maximum context per model | A fresh load given less context than asked | Matching requests to a copy loaded at that maximum |
 | Real GPU capacity per host | Spills (see above) | Usable memory in placement |
 
 Before a model has been seen, llm-head estimates from its file size: 1.15 × file size for

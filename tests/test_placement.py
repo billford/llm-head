@@ -259,6 +259,19 @@ def test_spilled_copy_is_used_when_offload_is_allowed():
     assert (d.host, d.cold) == ("european", False)
 
 
+def test_spilled_copy_is_evicted_before_a_full_one():
+    """2026-10-05 21:37: an embed request needed a slot on european, which held gpt-oss and
+    a spilled llama3.2. Counting the spilled copy toward llama's keep_warm protected it, so
+    gpt-oss was unloaded and its next user paid a cold load."""
+    embed = "nomic-embed-text:latest"
+    xmas = host("xmas", [QWEN, LLAMA], inflight={QWEN: 1, LLAMA: 1}, installed=ALL | {embed})
+    eu = spilled_llama_beside_gptoss(installed=ALL | {embed})
+    warm = {LLAMA: facts(LLAMA, keep_warm=2, load_time=1.5), GPTOSS: facts(GPTOSS, load_time=6.0),
+            QWEN: facts(QWEN, keep_warm=1)}
+    d = choose(embed, [xmas, eu], ModelFacts(vram_bytes=300_000_000, load_time=1.0), warm_facts=warm)
+    assert (d.host, d.evict) == ("european", (LLAMA,))
+
+
 def test_learned_capacity_stops_pairing_gptoss_with_llama():
     """The configured 15.4 GiB says gpt-oss + llama3.2 fit; the learned 13.9 GiB says not."""
     busy_xmas = host("xmas", [QWEN, LLAMA], inflight={LLAMA: 1})

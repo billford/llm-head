@@ -277,8 +277,9 @@ def _plan_eviction(
         kw = warm_facts.get(m, ModelFacts(0)).keep_warm
         if kw == 0:
             return False
-        copies = sum(1 for h in all_hosts if h.routable and m in h.loaded)
-        return copies <= kw
+        # A spilled copy isn't one: it's the first thing worth unloading.
+        copies = sum(1 for h in all_hosts if h.routable and m in h.loaded and not h.loaded[m].spilled)
+        return copies <= kw and not host.loaded[m].spilled
 
     idle = [m for m in host.loaded if host.is_idle(m) and not protected(m)]
     # Hosts hold only a handful of models, so try every subset of idle models and keep

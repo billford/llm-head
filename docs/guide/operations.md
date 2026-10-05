@@ -194,7 +194,9 @@ Olla's events keep Olla's names and fields. The rest are additions.
 | `Model spilled onto CPU` | WARN | `/api/ps` shows a model partly on the CPU: `size_vram` < `size` |
 | `Model fully on GPU again` | INFO | A spilled copy is now fully on the GPU |
 | `Endpoint GPU capacity learned` | INFO | Usable GPU memory for a host changed, from a spill |
+| `Endpoint GPU capacity not learned` | WARN | A spill would imply under half the configured memory; probably something else is using the GPU. Check `nvidia-smi` |
 | `Endpoint GPU capacity reset` | WARN | Someone called `reset-capacity` |
+| `Model context capped` | INFO | Ollama loaded a model with less context than asked; that's its maximum, and is remembered |
 | `Model quarantined on endpoint` | WARN | Model failed to load or stalled; avoided there for `seconds` |
 | `Model quarantine cleared` | INFO | A request for it succeeded there again |
 | `Endpoint status changed: <name>` and `Endpoint status changed:` | INFO / WARN | Health status changed. Two lines, as in Olla |
@@ -204,8 +206,10 @@ Olla's events keep Olla's names and fields. The rest are additions.
 
 ## The stats file
 
-`stats_file` (JSON) holds what llm-head has learned: per-model memory, durations, load
-times and usual context size, plus `host_vram`, the GPU capacity learned from spills.
+`stats_file` (JSON) holds what llm-head has learned:
+- per-model memory, durations, load times and usual context size;
+- `host_vram`: the GPU capacity learned from spills;
+- `max_ctx`: models whose maximum context is below what was asked for.
 
 - It's safe to delete when llm-head is stopped. llm-head goes back to estimates and
   relearns from traffic within hours.

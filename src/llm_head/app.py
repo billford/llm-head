@@ -122,6 +122,7 @@ class Head:
             if not hosts:
                 continue
             ctx = policy.num_ctx or self.stats.usual_ctx(model) or hosts[0].cfg.default_num_ctx
+            ctx = self.effective_ctx(model, ctx) or ctx
             warm = [h for h in hosts if h.is_warm(model, ctx)
                     or (model in h.pending_loads and h.pending_loads[model][3] == ctx)]
             if len(warm) >= policy.keep_warm:
@@ -157,6 +158,7 @@ class Head:
             if not hosts:
                 continue
             ctx = policy.num_ctx or self.stats.usual_ctx(model) or hosts[0].cfg.default_num_ctx
+            ctx = self.effective_ctx(model, ctx) or ctx
             warm = [h for h in hosts if h.is_warm(model, ctx)]
             if len(warm) <= policy.keep_warm or _home_short(policy, hosts, warm) > 0:
                 continue
@@ -205,6 +207,16 @@ class Head:
             self.cluster.end(host, model, ok=ok, duration_ms=0, nbytes=0)
 
     # ---- helpers -----------------------------------------------------------------------
+
+    def effective_ctx(self, model: str, ctx: int | None) -> int | None:
+        """The context size `model` will really be loaded with for a request asking for
+        `ctx` (None: the host default). Ollama caps it at the model's own maximum, so
+        asking for more must still match a copy loaded at that maximum."""
+        cap = self.stats.max_ctx.get(model)
+        if not cap:
+            return ctx
+        want = ctx or max(h.default_num_ctx for h in self.cfg.hosts)
+        return cap if want > cap else ctx
 
     def classify(self, ip: str) -> str:
         try:
@@ -331,7 +343,7 @@ async def proxy(request: Request) -> Response:
         )
 
     klass = head.classify(ip)
-    ctx = _requested_ctx(body)
+    ctx = head.effective_ctx(model, _requested_ctx(body))
     exclude: frozenset[str] = frozenset()
     last_error = ""
     attempts = head.cfg.proxy.max_attempts or len(head.cluster.hosts)

@@ -24,6 +24,7 @@ curl -s http://gpu1.lan:11434/api/ps | python3 -m json.tool
 - [Clients get 502](#clients-get-502)
 - [Clients get 429](#clients-get-429)
 - [Requests are slow](#requests-are-slow)
+- [A client with a short timeout fails on the first request](#a-client-with-a-short-timeout-fails-on-the-first-request)
 - [Too many cold loads](#too-many-cold-loads)
 - [A model is spilled onto the CPU](#a-model-is-spilled-onto-the-cpu)
 - [A host shows less usable GPU memory than expected](#a-host-shows-less-usable-gpu-memory-than-expected)
@@ -124,6 +125,19 @@ Look at the request's `Request completed` line:
 To get a model's normal speed, send one request directly to an idle host with it fully
 loaded, and note the `eval_count` / `eval_duration` it reports.
 
+## A client with a short timeout fails on the first request
+
+Some clients wait only a few seconds. newshelper's chat proxy, for example, gives its
+retrieval step 5 s, and retrieval needs an embedding. If that request has to load its
+model first, it can take longer, especially when another model must be unloaded to make
+room. The client then gives up even though llm-head answers.
+
+- Look at the request's `Request completed` line. A cold `placement` and a `duration_ms`
+  near the client's timeout confirm it.
+- Give such clients a timeout that allows for a cold load, about 15 s for a small model.
+- Or keep the model warm (`keep_warm: 1`). It takes one of `max_loaded_models` on a host,
+  but a small embedding model fits beside almost anything.
+
 ## Too many cold loads
 
 Count them by reason:
@@ -134,7 +148,7 @@ grep '"Request completed"' /opt/olla/logs/olla.log | grep -o '"placement":"[a-z_
 
 | Mostly | Meaning | Fix |
 |---|---|---|
-| `reload_context` | Same model requested at different context sizes | Make clients send one `num_ctx` consistently, warmup and health probes included. Set `models.<name>.num_ctx` for keep-warm |
+| `reload_context` | Same model requested at different context sizes | Make clients send one `num_ctx` consistently, warmup and health probes included. Set `models.<name>.num_ctx` for keep-warm. If the same model gets `reload_context` again and again, check for a `Model context capped` line for it. Versions before 2026-10-05 didn't learn that cap and reloaded such models on every request |
 | `cold_load_evict` swapping the same two models on one host | They don't fit together, and both are in demand | Give each a different `home`, so they settle on different hosts |
 | `replica_cheaper_than_wait` | Bursts beyond one copy's slots | Expected under load. `keep_warm: 2` keeps the second copy |
 | `cold_load` after quiet periods | Ollama unloaded idle models | Raise `OLLAMA_KEEP_ALIVE`, or use `keep_warm` |
@@ -167,6 +181,17 @@ accept it.
 `vram_usable_mb` in `/internal/queue` is below `vram_mb - reserve_mb`. That means
 llm-head saw a spill on that host and learned a lower capacity. Look for `Endpoint GPU
 capacity learned` in the log, and the `Model spilled onto CPU` line just before it.
+
+If the figure is far too low, for example a few GB on a 16 GB card, almost nothing can be
+placed on that host. Requests queue or time out, and the other hosts take all the
+evictions. Versions before 2026-10-05 could learn such a figure from a spilled copy left
+behind after its neighbour unloaded. Unload the spilled copy first, then reset. Otherwise
+the leftover copy is measured again:
+
+```bash
+curl http://gpu2.lan:11434/api/generate -d '{"model":"<spilled model>","keep_alive":0}'
+curl -X POST localhost:40114/internal/hosts/gpu2/reset-capacity
+```
 
 - **If that spill was real** (two models that don't fit together), leave it. It's
   stopping the same spill from happening again.

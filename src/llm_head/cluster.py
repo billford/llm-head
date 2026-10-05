@@ -48,6 +48,8 @@ class HostState:
     loaded: dict[str, LoadedModel] = field(default_factory=dict)
     # GPU memory Ollama actually fits here, learned from spills; None until one is seen.
     vram_capacity: int | None = None
+    # Models loaded when a spill first appeared; learned from if the next poll matches.
+    spill_candidate: frozenset[str] | None = None
     # Loads and evictions the head started that /api/ps doesn't reflect yet.
     # model -> (bytes, give-up deadline, expected ready time, context size); monotonic seconds
     pending_loads: dict[str, tuple[int, float, float, int]] = field(default_factory=dict)
@@ -331,19 +333,37 @@ class Cluster:
                               size_vram=vram, size=size, context_length=ctx)
             elif was and was.spilled and not spilled:
                 self.log.info("Model fully on GPU again", endpoint=h.name, model=name)
-        # What's on the GPU right now is a measured capacity when something has spilled,
-        # and a lower bound on it otherwise. A spill counts once two polls in a row show
-        # it, so a poll that catches a load half done can't shrink the capacity for good.
-        settled = any(lm.spilled and name in h.loaded and h.loaded[name].spilled for name, lm in loaded.items())
-        if loaded and (settled or not any(lm.spilled for lm in loaded.values())):
-            on_gpu = sum(lm.vram_bytes for lm in loaded.values())
-            cap = self.stats.observe_host_vram(h.name, on_gpu, spilled=settled)
-            if cap is not None:
-                h.vram_capacity = cap
-                self.log.info("Endpoint GPU capacity learned", endpoint=h.name, usable_vram_bytes=h.usable_vram_bytes,
-                              configured_bytes=h.cfg.usable_vram_bytes)
+        # A spill measures the host's capacity only at the moment it happens: a model was
+        # loaded beside the others and didn't fit, so what's on the GPU is what fits. The
+        # next poll must show the same models, so one that catches a load half done can't
+        # count. A copy that stays spilled after its neighbours unload measures nothing:
+        # Ollama doesn't move it back onto the GPU (2026-10-05: european "learned" 2.1 GB
+        # from a lingering llama3.2 copy once gpt-oss was unloaded). With nothing spilled,
+        # what's on the GPU is a lower bound on the capacity.
+        names = frozenset(loaded)
+        on_gpu = sum(lm.vram_bytes for lm in loaded.values())
+        any_spilled = any(lm.spilled for lm in loaded.values())
+        if any(lm.spilled and not (n in h.loaded and h.loaded[n].spilled) for n, lm in loaded.items()):
+            h.spill_candidate = names
+        elif h.spill_candidate is not None:
+            if names == h.spill_candidate and any_spilled:
+                self._learn_capacity(h, on_gpu, spilled=True)
+            h.spill_candidate = None
+        if loaded and not any_spilled:
+            self._learn_capacity(h, on_gpu, spilled=False)
         changed = {(k, v.context_length, v.spilled) for k, v in loaded.items()} != {
             (k, v.context_length, v.spilled) for k, v in h.loaded.items()}
+        for name, pending in list(h.pending_loads.items()):
+            lm, was = loaded.get(name), h.loaded.get(name)
+            fresh = lm is not None and (was is None or was.context_length != lm.context_length)
+            if fresh and lm.context_length and lm.context_length < pending[3]:
+                # Ollama loaded it with less context than asked for: that's the model's own
+                # maximum (nomic-embed-text: 2048). Only a copy that just appeared counts, not
+                # an old one still loaded at a smaller size while it's being replaced.
+                if self.stats.observe_ctx_cap(name, lm.context_length):
+                    self.log.info("Model context capped", endpoint=h.name, model=name,
+                                  requested=pending[3], context_length=lm.context_length)
+                del h.pending_loads[name]
         h.loaded = loaded
         for name, pending in list(h.pending_loads.items()):
             if h.is_loaded(name, pending[3]):
@@ -354,6 +374,21 @@ class Cluster:
                 del h.pending_evictions[name]
         if changed:
             self.on_change()
+
+    def _learn_capacity(self, h: HostState, on_gpu: int, *, spilled: bool) -> None:
+        if spilled and on_gpu < h.cfg.usable_vram_bytes // 2:
+            # Less than half the configured memory: more likely something else on the GPU
+            # than a real limit. Say so instead of crippling the host.
+            if h.vram_capacity is None or on_gpu < h.vram_capacity:
+                self.log.warn("Endpoint GPU capacity not learned", endpoint=h.name, on_gpu_bytes=on_gpu,
+                              configured_bytes=h.cfg.usable_vram_bytes,
+                              reason="spill implies under half the configured GPU memory; check for other GPU users")
+            return
+        cap = self.stats.observe_host_vram(h.name, on_gpu, spilled=spilled)
+        if cap is not None:
+            h.vram_capacity = cap
+            self.log.info("Endpoint GPU capacity learned", endpoint=h.name, usable_vram_bytes=h.usable_vram_bytes,
+                          configured_bytes=h.cfg.usable_vram_bytes)
 
     async def _tags_loop(self, h: HostState) -> None:
         # Wait for the first health check so a down host doesn't delay startup.

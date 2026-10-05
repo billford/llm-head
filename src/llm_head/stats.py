@@ -42,6 +42,10 @@ class Stats:
         self.models: dict[str, ModelStats] = {}
         # host -> bytes of models Ollama actually fit on its GPU; learned from spills.
         self.host_vram: dict[str, int] = {}
+        # model -> the most context Ollama gives it (its trained maximum), when that is
+        # below what was asked for. Kept apart from `models` so older versions can still
+        # read the file.
+        self.max_ctx: dict[str, int] = {}
         self.dirty = False
         if path:
             self._load()
@@ -76,6 +80,14 @@ class Stats:
         if old is not None:
             self.dirty = True
         return old
+
+    def observe_ctx_cap(self, model: str, ctx: int) -> bool:
+        """Record that Ollama loaded `model` with at most `ctx` context. True if new."""
+        if self.max_ctx.get(model) == ctx:
+            return False
+        self.max_ctx[model] = ctx
+        self.dirty = True
+        return True
 
     def observe_request(self, model: str, duration: float, load_time: float = 0.0,
                         ctx: int | None = None) -> None:
@@ -114,6 +126,7 @@ class Stats:
                 raw = json.load(f)
             self.models = {k: ModelStats(**v) for k, v in raw.get("models", {}).items()}
             self.host_vram = {k: int(v) for k, v in raw.get("host_vram", {}).items()}
+            self.max_ctx = {k: int(v) for k, v in raw.get("max_ctx", {}).items()}
         except FileNotFoundError:
             pass
         except (OSError, ValueError, TypeError) as exc:
@@ -122,7 +135,8 @@ class Stats:
     def save(self) -> None:
         if not self.path or not self.dirty:
             return
-        data = {"models": {k: asdict(v) for k, v in self.models.items()}, "host_vram": self.host_vram}
+        data = {"models": {k: asdict(v) for k, v in self.models.items()}, "host_vram": self.host_vram,
+                "max_ctx": self.max_ctx}
         d = os.path.dirname(self.path) or "."
         try:
             os.makedirs(d, exist_ok=True)

@@ -59,6 +59,8 @@ class FakeOllama:
     # silently, while already-loaded models keep working and GET / stays healthy.
     wedged: bool = False
     default_ctx: int = 4096
+    # Context Ollama gives a model at most, its trained maximum, whatever is asked for.
+    max_ctx: dict[str, int] = field(default_factory=lambda: {"nomic-embed-text:latest": 2048})
     reloads: int = 0
     # Observability for tests.
     loaded: dict[str, Loaded] = field(default_factory=dict)
@@ -102,7 +104,7 @@ class FakeOllama:
 
         A model loaded with a different context size is reloaded, but only once it has no
         requests running, as Ollama does."""
-        ctx = ctx or self.default_ctx
+        ctx = min(ctx or self.default_ctx, self.max_ctx.get(model, 1 << 30))
         lm = self.loaded.get(model)
         if lm and lm.ctx != ctx:
             if self.wedged:
@@ -263,6 +265,11 @@ class FakeOllama:
         m = self._resolve(body.get("model", ""))
         if not m:
             return JSONResponse({"error": "model not found"}, status_code=404)
+        if body.get("keep_alive") == 0 and not body.get("input"):
+            if m in self.loaded and self.loaded[m].inflight == 0:
+                del self.loaded[m]
+                self.evictions += 1
+            return JSONResponse({"model": m, "embeddings": []})
         lm, load_s = await self._run(m, 1)
         try:
             return JSONResponse({"model": m, "embeddings": [[0.1] * 8], "load_duration": int(load_s * 1e9), "prompt_eval_count": 3})
