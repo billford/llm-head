@@ -53,6 +53,10 @@ INFERENCE_PATHS = {
     "v1/chat/completions", "v1/completions", "v1/embeddings", "v1/responses",
 }
 
+# A keep_warm copy away from the model's home is unloaded once its home copies cover the
+# target and it has been idle this long. Long enough that a copy a burst just used stays.
+REHOME_IDLE = 300.0
+
 
 class Head:
     """Everything a request handler needs."""
@@ -121,7 +125,12 @@ class Head:
             warm = [h for h in hosts if h.is_warm(model, ctx)
                     or (model in h.pending_loads and h.pending_loads[model][3] == ctx)]
             if len(warm) >= policy.keep_warm:
-                continue
+                # Enough copies, but maybe not where they belong: after a drain or reboot
+                # a copy can stay warm away from home and keep its host's GPU busy.
+                # Add one at home; rehome_evictions() then unloads the stray copy.
+                if _home_short(policy, hosts, warm) == 0:
+                    continue
+                hosts = [h for h in hosts if h.name in policy.home]
             need = self.cluster.facts(model).vram_bytes
             idle = [h for h in hosts if h not in warm and sum(h.inflight.values()) == 0
                     and not (model in h.loaded and h.loaded[model].spilled)
@@ -132,12 +141,49 @@ class Head:
                 out.append((idle[0].name, model, ctx))
         return out
 
+    def rehome_evictions(self) -> list[tuple[str, str]]:
+        """(host, model) copies of keep_warm models to unload: copies away from home that
+        are surplus once the home hosts hold enough, and idle for REHOME_IDLE.
+        At most one per model per round."""
+        if self.scheduler.waiting or not self.cfg.scheduling.evict:
+            return []
+        now = time.monotonic()
+        out = []
+        for pattern, policy in self.cfg.models.items():
+            if policy.keep_warm == 0 or not policy.home or any(ch in pattern for ch in "*?["):
+                continue
+            model = normalize(pattern)
+            hosts = [h for h in self.cluster.hosts.values() if h.routable and model in h.installed]
+            if not hosts:
+                continue
+            ctx = policy.num_ctx or self.stats.usual_ctx(model) or hosts[0].cfg.default_num_ctx
+            warm = [h for h in hosts if h.is_warm(model, ctx)]
+            if len(warm) <= policy.keep_warm or _home_short(policy, hosts, warm) > 0:
+                continue
+            stray = [h for h in warm if h.name not in policy.home and h.inflight[model] == 0
+                     and model not in h.pending_evictions
+                     and now - h.last_used.get(model, 0.0) >= REHOME_IDLE]
+            if stray:
+                stray.sort(key=lambda h: h.last_used.get(model, 0.0))
+                out.append((stray[0].name, model))
+        return out
+
     async def _warm_loop(self) -> None:
-        """Keep `keep_warm` models loaded on enough hosts, at the context size they're used at."""
+        """Keep `keep_warm` models loaded on enough hosts, at the context size they're used
+        at, and on their home hosts when those have room."""
         while True:
             await asyncio.sleep(15)
-            for host, model, ctx in self.warm_targets():
-                await self.warm(host, model, ctx)
+            await self.keep_warm_round()
+
+    async def keep_warm_round(self) -> None:
+        for host, model, ctx in self.warm_targets():
+            await self.warm(host, model, ctx)
+        for host, model in self.rehome_evictions():
+            h = self.cluster.hosts[host]
+            # Hide the copy from placement now, before the unload request is sent.
+            h.pending_evictions[model] = h.loaded[model].context_length if model in h.loaded else None
+            self.log.info("Rehoming model", model=model, endpoint=host, home=self.cfg.policy_for(model).home)
+            await self.evict(host, (model,))
 
     async def warm(self, host: str, model: str, ctx: int) -> None:
         h = self.cluster.hosts[host]
@@ -411,6 +457,14 @@ async def _finish_stream(head: Head, rid: str, lease: Lease, relay, started: flo
                                                                      f"HTTP {relay.response.status_code}"),
                 stalled=relay.stalled, total_bytes=relay.nbytes,
             )
+
+
+def _home_short(policy, hosts: list, warm: list) -> int:
+    """How many more warm copies the model's home hosts should hold: up to keep_warm, and
+    no more than the home hosts available."""
+    homes = [h for h in hosts if h.name in policy.home]
+    want = min(policy.keep_warm, len(homes))
+    return max(0, want - sum(1 for h in warm if h.name in policy.home))
 
 
 def _fits_beside_loaded(snap: HostSnapshot, model: str, need: int) -> bool:

@@ -141,7 +141,17 @@ It doesn't run while any request is waiting. It loads at `models.<name>.num_ctx`
 otherwise at the context size the model is most often requested at, learned from recent
 traffic.
 
-Look for `Warming model` lines in the log.
+**Moving back home.** A model with `home` hosts can end up warm somewhere else, for
+example after its home host was drained for a reboot. Then it takes GPU memory that
+other models need. So keep-warm also checks where the copies are:
+
+1. If the home hosts hold fewer than `keep_warm` copies, it loads one at home. This uses
+   the same rules as above: the home host must be idle and have room, with no eviction.
+2. Once the home copies cover the target, it unloads one surplus copy away from home.
+   This happens only when that copy has nothing in flight and has been idle for 5
+   minutes, so a copy a burst has just used isn't dropped. It needs `scheduling.evict`.
+
+Look for `Warming model` and `Rehoming model` lines in the log.
 
 ## CPU spill detection
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections import Counter
 
 from .conftest import cluster
@@ -304,6 +305,80 @@ async def test_keep_warm_prefers_the_home_host():
     over = {"models": {QWEN: {"keep_warm": 1, "num_ctx": 8192, "home": ["european"]}}}
     async with cluster(head_overrides=over) as (c, head, fakes, log):
         assert head.warm_targets() == [("european", "qwen2.5vl:7b-q4_k_m", 8192)]
+
+
+async def _wait_loaded(head, host, model, present=True):
+    from llm_head.names import normalize
+
+    for _ in range(100):
+        if (normalize(model) in head.cluster.hosts[host].loaded) == present:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"{model} {'never appeared' if present else 'never left'} on {host}")
+
+
+async def test_keep_warm_moves_a_stray_copy_back_home():
+    """24-hour check 2026-10-04: after a drain, qwen (keep_warm 1, home xmas) stayed warm
+    on european. Keep-warm counted one copy and was satisfied, so gpt-oss lost its home."""
+    from llm_head import app as app_mod
+
+    q = "qwen2.5vl:7b-q4_k_m"
+    over = {"models": {QWEN: {"keep_warm": 1, "num_ctx": 4096, "home": ["xmas"]}}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        await fakes[1]._ensure_loaded(QWEN)
+        await _wait_loaded(head, "european", QWEN)
+        # One copy meets the target, but it's away from home: warm one at home.
+        assert head.warm_targets() == [("xmas", q, 4096)]
+        assert head.rehome_evictions() == []  # never unload before the home copy is warm
+        await head.warm("xmas", q, 4096)
+        await _wait_loaded(head, "xmas", QWEN)
+        assert head.warm_targets() == []
+        # The stray copy was just used: keep it for now, a burst may want it.
+        eu = head.cluster.hosts["european"]
+        eu.last_used[q] = time.monotonic()
+        assert head.rehome_evictions() == []
+        # Idle long enough: unload it.
+        eu.last_used[q] = time.monotonic() - app_mod.REHOME_IDLE - 1
+        assert head.rehome_evictions() == [("european", q)]
+        # Busy: never.
+        eu.inflight[q] += 1
+        assert head.rehome_evictions() == []
+        eu.inflight[q] -= 1
+        # A full round unloads it on the host, and placement stops using it at once.
+        await head.keep_warm_round()
+        assert q in eu.pending_evictions
+        await _wait_loaded(head, "european", QWEN, present=False)
+        assert QWEN not in fakes[1].loaded and QWEN in fakes[0].loaded
+        assert log.find("Rehoming model")
+        r = await c.post(GEN, json=gen())
+        assert r.headers["x-olla-endpoint"] == "xmas" and r.headers["x-olla-routing-reason"] == "loaded"
+
+
+async def test_keep_warm_rehoming_never_evicts_to_make_room_at_home():
+    over = {"models": {QWEN: {"keep_warm": 1, "num_ctx": 4096, "home": ["xmas"]}}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        await fakes[1]._ensure_loaded(QWEN)
+        await fakes[0]._ensure_loaded("llama3.2:3b")
+        await fakes[0]._ensure_loaded("nomic-embed-text:latest")
+        await _wait_loaded(head, "xmas", "nomic-embed-text:latest")
+        # xmas holds max_loaded_models already: wait for room rather than evict.
+        assert head.warm_targets() == []
+        assert head.rehome_evictions() == []
+
+
+async def test_keep_warm_rehoming_is_off_without_eviction():
+    from llm_head import app as app_mod
+
+    q = "qwen2.5vl:7b-q4_k_m"
+    over = {"models": {QWEN: {"keep_warm": 1, "num_ctx": 4096, "home": ["xmas"]}},
+            "scheduling": {"evict": False}}
+    async with cluster(head_overrides=over) as (c, head, fakes, log):
+        for f in fakes:
+            await f._ensure_loaded(QWEN)
+        await _wait_loaded(head, "xmas", QWEN)
+        await _wait_loaded(head, "european", QWEN)
+        head.cluster.hosts["european"].last_used[q] = time.monotonic() - app_mod.REHOME_IDLE - 1
+        assert head.rehome_evictions() == []
 
 
 async def _spill_llama_on_european(head, fakes):

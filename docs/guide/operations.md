@@ -190,6 +190,7 @@ Olla's events keep Olla's names and fields. The rest are additions.
 | `Model routing rejected request` | WARN | No host has the model (`404`) |
 | `Evicting model` | INFO | Unloading a model to make room |
 | `Warming model` / `Warming failed` | INFO / WARN | Keep-warm load started, or failed |
+| `Rehoming model` | INFO | Keep-warm is unloading a copy away from the model's `home`, now that home holds enough |
 | `Model spilled onto CPU` | WARN | `/api/ps` shows a model partly on the CPU: `size_vram` < `size` |
 | `Model fully on GPU again` | INFO | A spilled copy is now fully on the GPU |
 | `Endpoint GPU capacity learned` | INFO | Usable GPU memory for a host changed, from a spill |

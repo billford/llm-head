@@ -73,14 +73,15 @@ models:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `home` | `[]` | Preferred hosts. A tie-breaker only: the model still goes wherever it fits |
+| `home` | `[]` | Preferred hosts. For placement, a tie-breaker only: the model still goes wherever it fits. For `keep_warm` models, where the warm copies are kept |
 | `keep_warm` | `0` | Keep the model loaded on this many hosts while they're idle. Can't exceed the number of hosts |
 | `num_ctx` | learned | Context size keep-warm loads the model at. Default: the size it's mostly requested at, learned from traffic |
 | `allow_cpu_offload` | `false` | Allow placing this model where part of it would run on the CPU |
 
 **`keep_warm`** only uses hosts with nothing in flight, never evicts another model to
 make room, and pauses while any request is waiting. It ignores glob keys, so name the
-model exactly.
+model exactly. With `home` set, it also moves the model back home after it has ended up
+warm elsewhere; see [how-it-works.md](how-it-works.md#keep-warm).
 
 **Set `num_ctx` when a client always uses one context size.** A model warmed at the
 wrong size is worse than none: Ollama must reload it before the first real request.
