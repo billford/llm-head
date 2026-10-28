@@ -67,12 +67,11 @@ leftover whose hosts were already failing; the yard tracker's last successful ca
 | Client | Before | Now |
 |---|---|---|
 | yard_tracker (misfit) | misfit's Olla, `qwen2.5:32b` | `http://lampoon:40114/olla/ollama`, `gpt-oss:20b` (yard_tracker `40aa2d6`). qwen2.5:32b (~20 GB) does not fit the 16 GB hosts |
-| agenttracker (lampoon) | `OLLAMA_BASE_URL=http://192.168.1.182:40114`, `qwen2.5:32b`, failing since 2026-07-26 (296 failures in the last 2 days) | **unchanged**: still failing. Needs `http://127.0.0.1:40114/olla/ollama` and a model the cluster has, in the root-owned `/opt/agenttracker/.env` |
+| agenttracker (lampoon) | `OLLAMA_BASE_URL=http://192.168.1.182:40114`, `qwen2.5:32b`, failing since 2026-07-26 (296 failures in the last 2 days); its database shows **no event ever scored** | `http://127.0.0.1:40114/olla/ollama`, `gpt-oss:20b` in `/opt/agenttracker/.env` (backup `.env.bak.<time>`), restarted 17:40:46 UTC. Scoring from the first event after; failed events were already marked processed, so no backlog. Example config fixed in agenttracker's repo |
 
 ## Follow-ups
 
 - Finish the runbook's removal step on lampoon (`/opt/olla/olla`, `/opt/olla/config/`;
   keep `/opt/olla/logs`) and decide whether `/opt/olla/dashboard` goes too.
-- agenttracker's base URL and model (above).
 - The runbook's cutover should disable or remove anything that `Wants=` the old unit,
   not only the unit itself.
